@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
+<title>Reaction Speed Roulette</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+</head>
+<body>
+
+<div id="name-gate" class="overlay">
+  <div class="gate-card">
+    <div class="gate-eyebrow">before you play</div>
+    <h1 class="gate-title">what's your name?</h1>
+    <p class="gate-sub">it's for the leaderboard. that's the only reason.</p>
+    <input id="name-input" type="text" maxlength="18" placeholder="e.g. Tawanda" autocomplete="off">
+    <p id="name-error" class="error"></p>
+    <button id="name-submit">let's go</button>
+  </div>
+</div>
+
+<div id="app" class="hidden">
+
+  <header class="topbar">
+    <div class="player">
+      <span class="player-label">playing as</span>
+      <span id="player-name" class="player-name">—</span>
+    </div>
+    <button id="board-toggle" class="board-btn">leaderboard</button>
+  </header>
+
+  <main id="stage" class="stage stage--idle">
+    <div class="stage-inner">
+      <div id="stage-text" class="stage-text">tap to arm</div>
+      <div id="stage-sub" class="stage-sub">then wait for green</div>
+    </div>
+  </main>
+
+  <footer class="statbar">
+    <div class="stat">
+      <div class="stat-label">last</div>
+      <div id="stat-last" class="stat-value">–</div>
+    </div>
+    <div class="stat stat--accent">
+      <div class="stat-label">best</div>
+      <div id="stat-best" class="stat-value">–</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">rounds</div>
+      <div id="stat-rounds" class="stat-value">0</div>
+    </div>
+  </footer>
+</div>
+
+<div id="leaderboard" class="overlay hidden">
+  <div class="board-card">
+    <div class="board-head">
+      <h2>leaderboard</h2>
+      <button id="board-close" class="icon-btn" aria-label="close leaderboard">×</button>
+    </div>
+    <p class="board-note">fastest reaction wins. everyone who plays shows up here.</p>
+    <ol id="board-list" class="board-list"></ol>
+    <p id="board-status" class="board-note"></p>
+  </div>
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>

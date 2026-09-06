@@ -238,13 +238,29 @@
       .limit(1);
     if (error) {
       console.error("players lookup failed:", error.message);
-      return { ok: true, network: true };
+      return { ok: false, error: true };
     }
 
     if (data && data.length > 0) {
       const existing = data[0];
       if (existing.device_id === deviceId) {
-        return { ok: true };
+        return { ok: true, canonicalName: existing.name };
+      }
+      if (existing.device_id === null) {
+        const { data: updated, error: updateError } = await supabase
+          .from("players")
+          .update({ device_id: deviceId })
+          .eq("name_lower", lower)
+          .is("device_id", null)
+          .select("name");
+        if (updateError) {
+          console.error("players claim failed:", updateError.message);
+          return { ok: false, error: true };
+        }
+        if (updated && updated.length > 0) {
+          return { ok: true, canonicalName: updated[0].name };
+        }
+        return { ok: false, taken: true };
       }
       return { ok: false, taken: true };
     }
@@ -257,9 +273,9 @@
         return { ok: false, taken: true };
       }
       console.error("players insert failed:", insertError.message);
-      return { ok: true, network: true };
+      return { ok: false, error: true };
     }
-    return { ok: true };
+    return { ok: true, canonicalName: value };
   }
 
   function handleNameSubmit() {
@@ -273,13 +289,16 @@
       return;
     }
     claimName(value).then((res) => {
-      if (!res.ok && res.taken) {
-        nameError.textContent = "That name is taken — try another.";
+      if (res.ok) {
+        const name = res.canonicalName || value;
+        nameError.textContent = "";
+        localStorage.setItem(STORAGE_NAME, name);
+        showApp(name);
         return;
       }
-      nameError.textContent = "";
-      localStorage.setItem(STORAGE_NAME, value);
-      showApp(value);
+      nameError.textContent = res.taken
+        ? "That name is taken — try another."
+        : "couldn't check that name — try again.";
     });
   }
 

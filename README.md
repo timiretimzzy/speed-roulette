@@ -14,8 +14,10 @@ visitor sees, some service has to accept writes from the public. This
 project uses **Supabase** (free-tier hosted Postgres with a public API) —
 you still don't run or maintain a server; you just get an API URL and a key.
 
-Until you set that up, the game falls back to a per-device leaderboard
-(stored in the browser) so it's still fully playable.
+Until you set that up — or whenever the backend can't be reached from a
+player's browser — the game plays in local mode: names aren't checked against
+the shared `players` table, and scores go to a per-device leaderboard stored
+in the browser instead of the shared one, so it's still fully playable.
 
 ## Set up the shared leaderboard (5 minutes)
 
@@ -27,7 +29,8 @@ Until you set that up, the game falls back to a per-device leaderboard
      id uuid primary key default gen_random_uuid(),
      name text not null,
      ms integer not null,
-     created_at timestamptz default now()
+     created_at timestamptz default now(),
+     constraint scores_ms_human check (ms >= 100 and ms <= 5000)
    );
 
    alter table scores enable row level security;
@@ -39,6 +42,40 @@ Until you set that up, the game falls back to a per-device leaderboard
    create policy "Anyone can read scores"
      on scores for select
      using (true);
+   ```
+
+   `ms` is bounded to 100–5000ms so clearly non-human submissions can't top
+   the leaderboard. If you already created the `scores` table before this
+   check existed, add it with:
+
+   ```sql
+   alter table scores add constraint scores_ms_human check (ms >= 100 and ms <= 5000);
+   ```
+
+   The game also needs a `players` table that reserves each racer name to the
+   first device that claims it (matched case-insensitively via `name_lower`):
+
+   ```sql
+   create table players (
+     name_lower text primary key,
+     name text not null,
+     device_id text
+   );
+
+   alter table players enable row level security;
+
+   create policy "Anyone can read player names"
+     on players for select
+     using (true);
+
+   create policy "Anyone can register a name"
+     on players for insert
+     with check (true);
+
+   create policy "Only unclaimed names can be claimed"
+     on players for update
+     using (device_id is null)
+     with check (true);
    ```
 
    This intentionally only allows INSERT and SELECT for the public key — no

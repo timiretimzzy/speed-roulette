@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Reaction Speed Roulette</title>
 <meta property="og:title" content="Reaction Speed Roulette">
 <meta property="og:description" content="Tap to arm, then hit green as fast as you can. How fast is your reaction?">
@@ -88,7 +88,7 @@
   <div id="challenge-pill" class="challenge-pill">🎯 daily: <b id="challenge-text">3× sub-300ms</b> <span id="challenge-progress">0/3</span></div>
   <div id="rival-banner" class="rival-banner hidden">👻 chasing <b id="rival-name">—</b> <span id="rival-gap" class="rival-gap"></span></div>
 
-  <main id="stage" class="stage stage--idle">
+  <main id="stage" class="stage stage--idle" role="button" tabindex="0">
     <div id="cursor-aura" aria-hidden="true"></div>
     <div class="ring" aria-hidden="true">
       <div class="ring-spin"></div>
@@ -102,8 +102,8 @@
       <div id="stage-sub" class="stage-sub">then wait for green</div>
       <a id="result-share" class="tweet-btn result-share hidden" href="#" target="_blank" rel="noopener">𝕏 tweet this</a>
       <div id="result-actions" class="result-actions hidden">
-        <button id="share-card-btn" class="chip-btn">🖼 share card</button>
-        <button id="rematch-btn" class="chip-btn chip-primary">↻ instant rematch</button>
+        <button id="share-card-btn" class="chip-btn" aria-label="share result as image card">🖼 share card</button>
+        <button id="rematch-btn" class="chip-btn chip-primary" aria-label="play another round immediately">↻ instant rematch</button>
       </div>
       <p id="result-note" class="result-note"></p>
       <p class="stage-hint"><kbd>space</kbd> or <kbd>tap</kbd> to play</p>
@@ -116,21 +116,21 @@
   </div>
 
   <footer class="statbar">
-    <button class="stat stat-btn" id="stat-last-btn">
+    <button class="stat stat-btn" id="stat-last-btn" aria-label="view stats for last result">
       <div class="stat-top"><span class="stat-ico">⚡</span><span class="stat-label">last</span></div>
       <div class="stat-row"><span id="stat-last" class="stat-value">–</span><span id="trend-last" class="trend"></span></div>
     </button>
-    <button class="stat stat--accent stat-btn" id="stat-best-btn">
+    <button class="stat stat--accent stat-btn" id="stat-best-btn" aria-label="view stats for personal best">
       <div class="stat-top"><span class="stat-ico">👑</span><span class="stat-label">best</span></div>
       <div class="stat-row"><span id="stat-best" class="stat-value">–</span><span class="crown-tag hidden" id="best-crown">PB</span></div>
     </button>
-    <button class="stat stat-btn" id="stat-rounds-btn">
+    <button class="stat stat-btn" id="stat-rounds-btn" aria-label="view stats for rounds played">
       <div class="stat-top"><span class="stat-ico">◉</span><span class="stat-label">rounds</span></div>
       <div class="stat-row"><span id="stat-rounds" class="stat-value">0</span></div>
     </button>
   </footer>
   <div id="analytics" class="analytics hidden">
-    <div class="analytics-head"><span>📈 form guide</span><span id="analytics-avg" class="analytics-avg"></span><button id="analytics-close" class="icon-btn icon-sm">×</button></div>
+    <div class="analytics-head"><span>📈 form guide</span><span id="analytics-avg" class="analytics-avg"></span><button id="analytics-close" class="icon-btn icon-sm" aria-label="close form guide">×</button></div>
     <canvas id="sparkline" width="600" height="120"></canvas>
     <div id="analytics-meta" class="analytics-meta"></div>
   </div>
@@ -158,11 +158,11 @@
 
 <div id="share-modal" class="overlay hidden">
   <div class="board-card share-card">
-    <div class="board-head"><div><div class="board-eyebrow">share your speed</div><h2 id="share-title">248ms ⚡</h2></div><button id="share-close" class="icon-btn">×</button></div>
+    <div class="board-head"><div><div class="board-eyebrow">share your speed</div><h2 id="share-title">248ms ⚡</h2></div><button id="share-close" class="icon-btn" aria-label="close share card">×</button></div>
     <canvas id="share-canvas" width="900" height="1120"></canvas>
     <div class="share-row">
-      <button id="share-download" class="tweet-btn" style="margin:0;flex:1">⬇ download</button>
-      <button id="share-native" class="tweet-btn" style="margin:0;flex:1">↗ share</button>
+      <button id="share-download" class="tweet-btn" style="margin:0;flex:1" aria-label="download result card as image">⬇ download</button>
+      <button id="share-native" class="tweet-btn" style="margin:0;flex:1" aria-label="share result card via device share menu">↗ share</button>
     </div>
   </div>
 </div>

@@ -66,6 +66,7 @@
   let lastMs = null;
   let boardExpanded = false;
   let lastRank = null;
+  let localMode = false;
 
   // ---- gamification state (localStorage) ----
   let game = loadGame();
@@ -138,7 +139,11 @@
   function paintAvatars() {
     const a = avatarFor(playerName || nameInput.value || "?");
     if (nameAvatar) { nameAvatar.textContent = a.ch; nameAvatar.style.background = a.bg; }
-    if (playerAvatarMain) { playerAvatarMain.textContent = avatarFor(playerName).ch; playerAvatarMain.style.background = avatarFor(playerName).bg; }
+    if (playerAvatarMain) {
+      const p = avatarFor(playerName);
+      playerAvatarMain.textContent = p.ch;
+      playerAvatarMain.style.background = p.bg;
+    }
   }
 
   function tierFor(ms) {
@@ -251,14 +256,14 @@
       else if (ms <= ch.target) ch.progress++;
       if (ch.progress >= ch.count) { ch.done = true; game.xp += 50; toast("Daily complete! +50 XP 🎯", "🎯", ""); fireConfetti(50); }
     }
-    saveGame(); renderGame();
+    renderGame();
     if (afterLvl > beforeLvl) { toast("Level up! You are now LVL " + afterLvl, "⚡", "toast--xp"); fireConfetti(110); }
     else if (isBest) toast("+" + xpGain(ms) + " XP", "✦", "toast--xp");
     if (game.streak === 3) toast("3-hit streak! You're on fire 🔥", "🔥", "toast--streak");
     if (game.streak === 5) unlock("streak5", "Achievement: 5 streak! 🔥");
     if (game.streak === 10) unlock("streak10", "Achievement: 10 streak — unstoppable! 🔥");
     if (ms < 200) unlock("sub200", "Achievement: sub-200ms — godlike! ⚡");
-    else if (ms < 250 && game.totalHits >= 1) unlock("sub250", "Achievement: sub-250ms elite! 🔥");
+    else if (ms < 250) unlock("sub250", "Achievement: sub-250ms elite! 🔥");
     if (game.totalHits === 10) unlock("rounds10", "Achievement: 10 rounds played! ◉");
     if (game.totalHits === 50) unlock("rounds50", "Achievement: 50 rounds — grinder! ◉");
   }
@@ -301,7 +306,8 @@
 
   // ---- leaderboard (shared + local fallback) ----
   async function submitScore(name, ms) {
-    if (supabase) {
+    if (!Number.isInteger(ms) || ms < 100 || ms > 5000) return true;
+    if (supabase && !localMode) {
       const { error } = await supabase.from("scores").insert({ name, ms });
       if (error) { console.error("Supabase insert failed:", error.message); resultNote.textContent = "couldn't save your score — check your connection."; return false; }
       resultNote.textContent = "";
@@ -317,17 +323,16 @@
   }
 
   async function fetchBoard() {
-    if (supabase) {
+    if (supabase && !localMode) {
       const { data, error } = await supabase.from("scores").select("name, ms, created_at").order("ms", { ascending: true }).limit(200);
-      if (error) { console.error("Supabase fetch failed:", error.message); return { entries: [], recent: [], mode: "error" }; }
+      if (error) { console.error("Supabase fetch failed:", error.message); return { entries: [], mode: "error" }; }
       const best = new Map();
       for (const r of (data || [])) { const c = best.get(r.name); if (c === undefined || r.ms < c) best.set(r.name, r.ms); }
       let entries = Array.from(best, ([name, ms]) => ({ name, ms })).sort((a, b) => a.ms - b.ms);
-      const recent = (data || []).slice(-6).reverse();
       if (!boardExpanded) entries = entries.slice(0, MAX_BOARD_ENTRIES);
-      return { entries, recent, mode: "shared" };
+      return { entries, mode: "shared" };
     }
-    return { entries: loadLocalBoard(), recent: [], mode: "local" };
+    return { entries: loadLocalBoard(), mode: "local" };
   }
 
   function medal(i) { return i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : String(i + 1); }
@@ -335,7 +340,8 @@
   async function renderBoard() {
     boardList.innerHTML = '<div class="board-loading"><div class="skel"></div><div class="skel"></div><div class="skel"></div></div>';
     boardStatus.textContent = "";
-    const { entries, recent, mode } = await fetchBoard();
+    const { entries, mode } = await fetchBoard();
+    lastEntries = entries || [];
     if (mode === "error") boardStatus.textContent = "couldn't reach the leaderboard right now.";
     if (mode === "local") boardStatus.textContent = "local board — connect Supabase for shared.";
     boardList.innerHTML = "";
@@ -361,18 +367,22 @@
       boardTweet.href = tweetHref("I scored " + mine.ms + "ms (#" + rank + ") on Reaction Speed Roulette. Think you can beat me?");
       boardTweet.classList.remove("hidden");
     } else boardTweet.classList.add("hidden");
-    // merge real recent scores into live feed
-    (recent || []).slice(0, 3).forEach((r) => {
-      if (r.name !== playerName) pushLive("<b>" + escapeHtml(r.name) + "</b> hit <span class='ms'>" + r.ms + "ms</span>");
-    });
   }
 
   // ---- name gate ----
   async function loadPersonalBest(name) {
-    if (!supabase) return;
-    const { data, error } = await supabase.from("scores").select("ms").eq("name", name).order("ms", { ascending: true }).limit(1);
-    if (error) return;
-    if (data && data.length) { sessionBest = data[0].ms; statBest.textContent = sessionBest + "ms"; if (bestCrown) bestCrown.classList.remove("hidden"); }
+    let best = null;
+    const local = loadLocalBoard().find((e) => e.name === name);
+    if (local) best = local.ms;
+    if (supabase && !localMode) {
+      const { data, error } = await supabase.from("scores").select("ms").eq("name", name).order("ms", { ascending: true }).limit(1);
+      if (!error && data && data.length) best = best === null ? data[0].ms : Math.min(best, data[0].ms);
+    }
+    if (best !== null) {
+      sessionBest = best;
+      statBest.textContent = sessionBest + "ms";
+      if (bestCrown) bestCrown.classList.remove("hidden");
+    }
   }
   function showApp(name) {
     playerName = name;
@@ -397,8 +407,9 @@
       .eq("name_lower", lower)
       .limit(1);
     if (error) {
-      console.error("players lookup failed:", error.message);
-      return { ok: false, error: true };
+      console.error("players lookup failed, falling back to local play:", error.message);
+      localMode = true;
+      return { ok: true, canonicalName: value };
     }
 
     if (data && data.length > 0) {
@@ -414,8 +425,9 @@
           .is("device_id", null)
           .select("name");
         if (updateError) {
-          console.error("players claim failed:", updateError.message);
-          return { ok: false, error: true };
+          console.error("players claim failed, falling back to local play:", updateError.message);
+          localMode = true;
+          return { ok: true, canonicalName: value };
         }
         if (updated && updated.length > 0) {
           return { ok: true, canonicalName: updated[0].name };
@@ -432,8 +444,9 @@
       if (String(insertError.code) === "23505") {
         return { ok: false, taken: true };
       }
-      console.error("players insert failed:", insertError.message);
-      return { ok: false, error: true };
+      console.error("players insert failed, falling back to local play:", insertError.message);
+      localMode = true;
+      return { ok: true, canonicalName: value };
     }
     return { ok: true, canonicalName: value };
   }
@@ -450,6 +463,7 @@
         localStorage.setItem(STORAGE_NAME, name);
         showApp(name);
         toast("Welcome, " + name + "! Tap to arm ⚡", "👋", "");
+        if (localMode) toast("Leaderboard unreachable — playing locally.", "📴", "");
         return;
       }
       nameError.textContent = res.taken
@@ -468,7 +482,8 @@
   // ---- stage ----
   const ICONS = { idle: "◉", wait: "⏳", go: "⚡", early: "✋", best: "👑" };
   function setStage(mode, title, sub) {
-    stage.className = "stage stage--" + mode;
+    stage.classList.remove("stage--idle", "stage--wait", "stage--go", "stage--early", "stage--best");
+    stage.classList.add("stage--" + mode);
     stageText.textContent = title;
     stageSub.textContent = sub;
     if (stageIcon) stageIcon.textContent = ICONS[mode] || "◉";
@@ -495,8 +510,8 @@
     gameState = "idle";
     const isBest = sessionBest === null || ms < sessionBest;
     const prevBest = sessionBest;
-    rounds++; game.totalHits++;
-    statRounds.textContent = game.totalHits;
+    rounds++;
+    statRounds.textContent = rounds;
     // trend vs last
     if (trendLast) {
       if (lastMs === null) trendLast.textContent = "";
@@ -579,7 +594,7 @@
   // live refresh while board open
   setInterval(() => { if (!boardOverlay.classList.contains("hidden")) renderBoard(); }, 15000);
   // realtime if supabase
-  if (supabase) {
+  if (supabase && !localMode) {
     try {
       supabase.channel("scores-live").on("postgres_changes", { event: "INSERT", schema: "public", table: "scores" }, (payload) => {
         const r = payload.new;
@@ -708,11 +723,8 @@
   const _renderBoard = renderBoard;
   renderBoard = async function () {
     await _renderBoard();
-    lastEntries = lastEntries; // keep ref fresh via hook below
     // podium top 3
     try {
-      const { entries } = await fetchBoard();
-      lastEntries = entries || [];
       if (podium) {
         podium.innerHTML = "";
         if (lastEntries.length >= 2) {
@@ -770,7 +782,6 @@
     ctx.fillText(ms + "ms", 60, 330); ctx.shadowBlur = 0;
     ctx.fillStyle = "#37e08c"; ctx.font = "800 44px Inter";
     ctx.fillText("⚡ " + t, 60, 400);
-    const av = avatarFor(playerName);
     ctx.fillStyle = "#fff"; ctx.font = "700 52px Inter"; ctx.fillText(playerName || "you", 60, 500);
     ctx.fillStyle = "rgba(255,255,255,0.65)"; ctx.font = "500 30px Inter";
     ctx.fillText("best " + (sessionBest || ms) + "ms · lvl " + levelFor(game.xp) + " · streak " + game.streak + "🔥", 60, 552);
@@ -785,7 +796,6 @@
     ctx.fillText("Think you can beat me?", 60, 900);
     ctx.fillStyle = "#fff"; ctx.font = "700 30px Inter";
     ctx.fillText("reaction-speed-roulette.vercel.app", 60, 950);
-    void av;
   }
   if (shareCardBtn) shareCardBtn.addEventListener("click", (e) => {
     e.stopPropagation(); drawShareCard();

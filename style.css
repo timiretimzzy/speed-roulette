@@ -212,6 +212,15 @@ kbd { font-family: var(--font-mono); font-size: 11px; background: rgba(255,255,2
 .crown-tag { font-family: var(--font-mono); font-size: 10px; font-weight: 700; letter-spacing: 0.1em; color: #0d0d16; background: linear-gradient(90deg, var(--gold), #ff9d5c); padding: 3px 8px; border-radius: 999px; }
 
 /* ---- leaderboard ---- */
+#leaderboard { padding: 12px; }
+#leaderboard .board-card {
+  width: min(94vw, 720px);
+  max-width: 720px;
+  max-height: 92dvh;
+  padding: 26px 22px 20px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
 .board-card { max-height: 82dvh; display: flex; flex-direction: column; max-width: 440px; }
 .board-head { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 4px; }
 .board-eyebrow { font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--gold); font-weight: 800; margin-bottom: 4px; }
@@ -221,8 +230,8 @@ kbd { font-family: var(--font-mono); font-size: 11px; background: rgba(255,255,2
 .board-note { font-size: 13px; color: var(--text-faint); margin: 0 0 14px; line-height: 1.5; }
 .board-expand { align-self: flex-start; border: 1px solid var(--line-strong); background: rgba(255,255,255,0.06); color: var(--text-dim); font-size: 13px; font-weight: 600; padding: 9px 16px; border-radius: 999px; cursor: pointer; font-family: inherit; margin: 0 0 8px; transition: background 0.15s; }
 .board-expand:hover { background: rgba(255,255,255,0.12); color: var(--text); }
-.board-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1; scrollbar-width: thin; }
-.board-row { display: flex; align-items: center; gap: 12px; padding: 11px 12px; border: 1px solid transparent; border-bottom: 1px solid var(--line); border-radius: 14px; animation: row-in 0.3s ease backwards; }
+.board-list { list-style: none; margin: 0; padding: 0; overflow: visible; flex: none; }
+.board-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid transparent; border-bottom: 1px solid var(--line); border-radius: 12px; animation: row-in 0.3s ease backwards; }
 .board-row:nth-child(1) { animation-delay: 0.02s; } .board-row:nth-child(2) { animation-delay: 0.06s; } .board-row:nth-child(3) { animation-delay: 0.1s; }
 @keyframes row-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 .board-row.me { background: rgba(139,132,255,0.12); border-color: rgba(139,132,255,0.35); }
@@ -283,7 +292,7 @@ kbd { font-family: var(--font-mono); font-size: 11px; background: rgba(255,255,2
 .toast--xp { border-color: rgba(139,132,255,0.5); } .toast--streak { border-color: rgba(255,150,60,0.55); } .toast--best { border-color: rgba(55,224,140,0.6); box-shadow: 0 0 30px rgba(55,224,140,0.3); } .toast--rank { border-color: rgba(255,215,92,0.6); }
 
 .activity-head { font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-faint); font-weight: 800; margin: 10px 0 8px; }
-.activity-feed { display: flex; flex-direction: column; gap: 6px; max-height: 110px; overflow: hidden; margin-bottom: 10px; }
+.activity-feed { display: flex; flex-direction: column; gap: 6px; max-height: 86px; overflow: hidden; margin-bottom: 10px; flex-shrink: 0; }
 .activity-item { font-size: 12.5px; color: var(--text-dim); background: rgba(255,255,255,0.04); border: 1px solid var(--line); padding: 8px 11px; border-radius: 12px; animation: row-in 0.35s ease backwards; }
 .activity-item b { color: var(--text); } .activity-item .ms { color: var(--go); font-family: var(--font-mono); font-weight: 700; }
 .activity-item.fresh { border-color: rgba(55,224,140,0.4); }
@@ -345,3 +354,15 @@ body[data-theme="ice"] .orb-b { background: radial-gradient(circle, #7dffc4 0%, 
   .xp-label { display: none; } .live-pill #online-count { max-width: 70px; overflow: hidden; }
   .stage { margin: 0 10px; border-radius: 26px; }
 }
+
+/* ---- leaderboard: large, many rows visible without scrolling ---- */
+@media (min-width: 640px) {
+  #leaderboard .board-card { width: min(94vw, 760px); max-width: 760px; }
+  #leaderboard .board-list { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; align-content: start; }
+  #leaderboard .board-empty { grid-column: 1 / -1; }
+}
+@media (max-width: 639px) {
+  #leaderboard .board-card { width: 94vw; max-height: 94dvh; padding: 22px 16px 16px; }
+}
+.podium { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin: 4px 0 10px; align-items: end; flex-shrink: 0; }
+.board-head, .board-note, .board-expand { flex-shrink: 0; }

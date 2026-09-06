@@ -4,7 +4,7 @@
   const STORAGE_NAME = "rsr_player_name";
   const DEVICE_KEY = "rsr_device_id";
   const GAME_KEY = "rsr_gamification_v1";
-  const MAX_BOARD_ENTRIES = 10;
+  const MAX_BOARD_ENTRIES = 30;
   const DEPLOYED_URL = "https://reaction-speed-roulette.vercel.app/";
 
   // ---- elements (all original IDs preserved) ----
@@ -570,7 +570,7 @@
   });
   boardExpand.addEventListener("click", () => {
     boardExpanded = !boardExpanded;
-    boardExpand.textContent = boardExpanded ? "top 10" : "show all";
+    boardExpand.textContent = boardExpanded ? "top 30" : "show all";
     renderBoard();
   });
   boardClose.addEventListener("click", () => boardOverlay.classList.add("hidden"));

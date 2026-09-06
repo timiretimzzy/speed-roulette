@@ -3,8 +3,11 @@
 
   const STORAGE_NAME = "rsr_player_name";
   const DEVICE_KEY = "rsr_device_id";
-  const GAME_KEY = "rsr_gamification_v1";
+  const GAME_KEY = "rsr_gamification_v2";
   const MAX_BOARD_ENTRIES = 30;
+  const LIVE_WINDOW_MS = 3 * 60 * 1000;
+  const BOARD_PAGE_SIZE = 200;
+  const RECONNECT_MS = 30 * 1000;
   const DEPLOYED_URL = "https://reaction-speed-roulette.vercel.app/";
 
   // ---- elements (all original IDs preserved) ----
@@ -40,7 +43,8 @@
   const boardList = document.getElementById("board-list");
   const boardStatus = document.getElementById("board-status");
   const boardTweet = document.getElementById("board-tweet");
-  const boardExpand = document.getElementById("board-expand");
+  const boardTabTop = document.getElementById("board-tab-top");
+  const boardTabAll = document.getElementById("board-tab-all");
 
   // ---- gamification elements ----
   const levelLabel = document.getElementById("level-label");
@@ -64,7 +68,7 @@
   let sessionBest = null;
   let rounds = 0;
   let lastMs = null;
-  let boardExpanded = false;
+  let boardMode = "top10";
   let lastRank = null;
   let localMode = false;
 
@@ -268,21 +272,29 @@
     if (game.totalHits === 50) unlock("rounds50", "Achievement: 50 rounds — grinder! ◉");
   }
 
-  // ---- live feel: ticker, activity, online count ----
-  const FAKE_NAMES = ["Tawanda", "Rudo", "Tinashe", "Nyasha", "Kuda", "Anesu", "Tadiwa", "Rutendo", "Farai", "Simba", "Noku", "Tendai"];
+  // ---- live feel: ticker, activity, online count (real data only) ----
   let liveEvents = [];
   function pushLive(html, fresh) {
     liveEvents.unshift({ html, t: Date.now(), fresh: !!fresh });
-    liveEvents = liveEvents.slice(0, 8);
+    liveEvents = liveEvents.slice(0, 12);
     renderTicker(); renderActivity();
+  }
+  function pruneLive() {
+    const cutoff = Date.now() - LIVE_WINDOW_MS;
+    const before = liveEvents.length;
+    liveEvents = liveEvents.filter((e) => e.t >= cutoff);
+    if (liveEvents.length !== before) { renderTicker(); renderActivity(); }
   }
   function renderTicker() {
     if (!ticker) return;
-    if (!liveEvents.length) { ticker.textContent = "warming up the roulette…"; return; }
+    const strip = ticker.closest(".live-strip");
+    if (strip) strip.classList.toggle("hidden", !liveEvents.length);
+    if (!liveEvents.length) return;
     ticker.innerHTML = liveEvents.map((e) => "<span>" + e.html + "</span>").join("&nbsp;&nbsp;◆&nbsp;&nbsp;");
   }
   function renderActivity() {
     if (!activityFeed) return;
+    const section = document.getElementById("activity-section");
     activityFeed.innerHTML = "";
     liveEvents.slice(0, 3).forEach((e) => {
       const d = document.createElement("div");
@@ -290,29 +302,56 @@
       d.innerHTML = e.html;
       activityFeed.appendChild(d);
     });
-  }
-  function simulateLive() {
-    const n = FAKE_NAMES[Math.floor(Math.random() * FAKE_NAMES.length)];
-    if (n === playerName) return;
-    const ms = 170 + Math.floor(Math.random() * 220);
-    pushLive("<b>" + escapeHtml(n) + "</b> just hit <span class='ms'>" + ms + "ms</span>");
-    if (onlineCount) onlineCount.textContent = (9 + Math.floor(Math.random() * 22)) + " online";
+    if (section) section.classList.toggle("hidden", !liveEvents.length);
   }
   function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
-  setInterval(() => { if (!document.hidden) simulateLive(); }, 7000);
-  setInterval(() => { if (onlineCount && !document.hidden) onlineCount.textContent = (9 + Math.floor(Math.random() * 22)) + " online"; }, 4000);
-  pushLive("welcome to the <b>roulette</b> — tap to arm ⚡");
-  setTimeout(simulateLive, 2500); setTimeout(simulateLive, 5000);
+  setInterval(() => { if (!document.hidden) pruneLive(); }, 30000);
+
+  async function refreshOnlineCount() {
+    if (!onlineCount) return;
+    const pill = document.getElementById("live-pill");
+    if (!supabase || localMode) {
+      if (pill) pill.classList.add("hidden");
+      onlineCount.textContent = "";
+      return;
+    }
+    const cutoff = new Date(Date.now() - 60 * 1000).toISOString();
+    const { data, error } = await supabase.from("scores").select("name").gte("created_at", cutoff);
+    if (error) { console.error("online count failed:", error.message); return; }
+    const n = new Set((data || []).map((r) => r.name)).size;
+    if (pill) pill.classList.remove("hidden");
+    onlineCount.textContent = (n === 1 ? "1 online" : n + " online");
+  }
+  refreshOnlineCount();
+  setInterval(() => { if (!document.hidden) refreshOnlineCount(); }, 15000);
+
+  function enterLocalMode(cause) {
+    if (localMode) return;
+    localMode = true;
+    console.error(cause || "Supabase unavailable — switched to local play.");
+    toast("Leaderboard unreachable — playing locally.", "📴", "");
+    refreshOnlineCount();
+  }
+
+  let probeRunning = false;
+  async function checkSupabaseHealth() {
+    if (!supabase || !localMode || probeRunning) return;
+    probeRunning = true;
+    try {
+      const { error } = await supabase.from("scores").select("name").limit(1);
+      if (error) { console.warn("still offline — staying on the local board:", error.message); return; }
+      console.log("Supabase reachable — resuming shared leaderboard.");
+      localMode = false;
+      refreshOnlineCount();
+      subscribeLive();
+      toast("Leaderboard is back online — playing shared again.", "📶", "");
+      if (!boardOverlay.classList.contains("hidden")) renderBoard();
+    } finally { probeRunning = false; }
+  }
+  setInterval(() => { if (!document.hidden) checkSupabaseHealth(); }, RECONNECT_MS);
 
   // ---- leaderboard (shared + local fallback) ----
-  async function submitScore(name, ms) {
-    if (!Number.isInteger(ms) || ms < 100 || ms > 5000) return true;
-    if (supabase && !localMode) {
-      const { error } = await supabase.from("scores").insert({ name, ms });
-      if (error) { console.error("Supabase insert failed:", error.message); resultNote.textContent = "couldn't save your score — check your connection."; return false; }
-      resultNote.textContent = "";
-      return true;
-    }
+  function saveScoreLocal(name, ms) {
     const entries = loadLocalBoard();
     const ex = entries.find((e) => e.name === name);
     if (ex) { if (ms < ex.ms) ex.ms = ms; } else entries.push({ name, ms });
@@ -321,18 +360,44 @@
     resultNote.textContent = "";
     return true;
   }
+  async function submitScore(name, ms) {
+    if (!Number.isInteger(ms) || ms < 100 || ms > 5000) return true;
+    if (supabase && !localMode) {
+      const { error } = await supabase.from("scores").insert({ name, ms });
+      if (error) {
+        console.error("Supabase insert failed:", error.message);
+        enterLocalMode("Supabase insert failed");
+        return saveScoreLocal(name, ms);
+      }
+      resultNote.textContent = "";
+      return true;
+    }
+    return saveScoreLocal(name, ms);
+  }
 
   async function fetchBoard() {
     if (supabase && !localMode) {
-      const { data, error } = await supabase.from("scores").select("name, ms, created_at").order("ms", { ascending: true }).limit(200);
-      if (error) { console.error("Supabase fetch failed:", error.message); return { entries: [], mode: "error" }; }
-      const best = new Map();
-      for (const r of (data || [])) { const c = best.get(r.name); if (c === undefined || r.ms < c) best.set(r.name, r.ms); }
-      let entries = Array.from(best, ([name, ms]) => ({ name, ms })).sort((a, b) => a.ms - b.ms);
-      if (!boardExpanded) entries = entries.slice(0, MAX_BOARD_ENTRIES);
+      const byName = new Map();
+      let offset = 0, failed = false;
+      while (true) {
+        const res = await supabase
+          .from("scores")
+          .select("name, ms, created_at")
+          .order("ms", { ascending: true })
+          .range(offset, offset + BOARD_PAGE_SIZE - 1);
+        if (res.error) { console.error("Supabase fetch failed:", res.error.message); failed = true; enterLocalMode("Supabase fetch failed"); break; }
+        const page = res.data || [];
+        for (const r of page) { const c = byName.get(r.name); if (c === undefined || r.ms < c) byName.set(r.name, r.ms); }
+        if (page.length < BOARD_PAGE_SIZE) break;
+        offset += page.length;
+      }
+      if (failed) return { entries: loadLocalBoard(), mode: "local" };
+      let entries = Array.from(byName, ([name, ms]) => ({ name, ms })).sort((a, b) => a.ms - b.ms);
+      if (boardMode === "top10") entries = entries.slice(0, 10);
       return { entries, mode: "shared" };
     }
-    return { entries: loadLocalBoard(), mode: "local" };
+    const local = loadLocalBoard();
+    return { entries: boardMode === "top10" ? local.slice(0, 10) : local, mode: "local" };
   }
 
   function medal(i) { return i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : String(i + 1); }
@@ -407,8 +472,7 @@
       .eq("name_lower", lower)
       .limit(1);
     if (error) {
-      console.error("players lookup failed, falling back to local play:", error.message);
-      localMode = true;
+      enterLocalMode("players lookup failed, falling back to local play: " + error.message);
       return { ok: true, canonicalName: value };
     }
 
@@ -425,8 +489,7 @@
           .is("device_id", null)
           .select("name");
         if (updateError) {
-          console.error("players claim failed, falling back to local play:", updateError.message);
-          localMode = true;
+          enterLocalMode("players claim failed, falling back to local play: " + updateError.message);
           return { ok: true, canonicalName: value };
         }
         if (updated && updated.length > 0) {
@@ -444,8 +507,7 @@
       if (String(insertError.code) === "23505") {
         return { ok: false, taken: true };
       }
-      console.error("players insert failed, falling back to local play:", insertError.message);
-      localMode = true;
+      enterLocalMode("players insert failed, falling back to local play: " + insertError.message);
       return { ok: true, canonicalName: value };
     }
     return { ok: true, canonicalName: value };
@@ -463,7 +525,6 @@
         localStorage.setItem(STORAGE_NAME, name);
         showApp(name);
         toast("Welcome, " + name + "! Tap to arm ⚡", "👋", "");
-        if (localMode) toast("Leaderboard unreachable — playing locally.", "📴", "");
         return;
       }
       nameError.textContent = res.taken
@@ -577,39 +638,42 @@
   resultShare.addEventListener("click", (e) => e.stopPropagation());
 
   // ---- leaderboard overlay ----
+  function setBoardMode(mode) {
+    boardMode = mode;
+    boardTabTop.classList.toggle("is-active", mode === "top10");
+    boardTabAll.classList.toggle("is-active", mode === "everyone");
+    boardTabTop.setAttribute("aria-selected", mode === "top10" ? "true" : "false");
+    boardTabAll.setAttribute("aria-selected", mode === "everyone" ? "true" : "false");
+    renderBoard();
+  }
   boardToggle.addEventListener("click", () => {
     boardOverlay.classList.remove("hidden");
-    boardExpanded = false;
-    boardExpand.textContent = "show all";
-    renderBoard();
+    setBoardMode("top10");
   });
-  boardExpand.addEventListener("click", () => {
-    boardExpanded = !boardExpanded;
-    boardExpand.textContent = boardExpanded ? "top 30" : "show all";
-    renderBoard();
-  });
+  boardTabTop.addEventListener("click", () => setBoardMode("top10"));
+  boardTabAll.addEventListener("click", () => setBoardMode("everyone"));
   boardClose.addEventListener("click", () => boardOverlay.classList.add("hidden"));
   boardOverlay.addEventListener("click", (e) => { if (e.target === boardOverlay) boardOverlay.classList.add("hidden"); });
 
   // live refresh while board open
   setInterval(() => { if (!boardOverlay.classList.contains("hidden")) renderBoard(); }, 15000);
-  // realtime if supabase
-  if (supabase && !localMode) {
+  // realtime if supabase (created on entering shared mode; recreated after a reconnect)
+  let liveChannel = null;
+  function subscribeLive() {
+    if (!supabase || liveChannel) return;
     try {
-      supabase.channel("scores-live").on("postgres_changes", { event: "INSERT", schema: "public", table: "scores" }, (payload) => {
+      liveChannel = supabase.channel("scores-live").on("postgres_changes", { event: "INSERT", schema: "public", table: "scores" }, (payload) => {
         const r = payload.new;
         if (r && r.name !== playerName) pushLive("<b>" + escapeHtml(r.name) + "</b> hit <span class='ms'>" + r.ms + "ms</span>", true);
         if (!boardOverlay.classList.contains("hidden")) renderBoard();
       }).subscribe();
     } catch (_) {}
   }
+  if (supabase && !localMode) subscribeLive();
 
-  // ---- STATE OF ART: audio, tilt, analytics, rival, podium, share card, themes ----
+  // ---- STATE OF ART: audio, tilt, analytics, podium, share card, themes ----
   const soundToggle = document.getElementById("sound-toggle");
   const themeToggle = document.getElementById("theme-toggle");
-  const rivalBanner = document.getElementById("rival-banner");
-  const rivalName = document.getElementById("rival-name");
-  const rivalGap = document.getElementById("rival-gap");
   const resultActions = document.getElementById("result-actions");
   const shareCardBtn = document.getElementById("share-card-btn");
   const rematchBtn = document.getElementById("rematch-btn");
@@ -719,7 +783,7 @@
   }
   setInterval(() => { if (analytics && !analytics.classList.contains("hidden")) drawSpark(); }, 3000);
 
-  // rival + podium augmentation (wrap renderBoard)
+  // podium augmentation (wrap renderBoard)
   const _renderBoard = renderBoard;
   renderBoard = async function () {
     await _renderBoard();
@@ -740,23 +804,7 @@
           });
         }
       }
-      // rival: closest player above me
-      const i = lastEntries.findIndex((e) => e.name === playerName);
-      if (rivalBanner && i > 0) {
-        const rival = lastEntries[i - 1];
-        rivalBanner.classList.remove("hidden");
-        rivalName.textContent = rival.name;
-        rivalGap.textContent = "+" + (sessionBest - rival.ms > 0 ? sessionBest - rival.ms : rival.ms - (sessionBest || rival.ms)) + "ms to catch · #" + i;
-        if (sessionBest !== null && sessionBest <= rival.ms) {
-          rivalGap.textContent = "ahead! defend it 👑";
-          if (!rivalBanner.dataset.celebrated) { rivalBanner.dataset.celebrated = "1"; toast("You passed " + rival.name + "! 👻", "👻", "toast--rank"); }
-        }
-      } else if (rivalBanner && i === 0 && lastEntries.length > 1) {
-        rivalBanner.classList.remove("hidden");
-        rivalName.textContent = "the world";
-        rivalGap.textContent = "you lead by " + (lastEntries[1].ms - sessionBest) + "ms 👑";
-      } else if (rivalBanner) rivalBanner.classList.add("hidden");
-    } catch (_) {}
+      } catch (_) {}
   };
 
   // result actions + share card

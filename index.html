@@ -58,6 +58,7 @@
 
 <div id="app" class="hidden">
 
+  <div class="top-chrome">
   <header class="topbar">
     <div class="player">
       <span id="player-avatar-main" class="avatar avatar-sm">–</span>
@@ -81,12 +82,12 @@
       <span id="xp-label" class="xp-label">0 XP</span>
     </div>
     <div class="hud-right">
-      <div class="live-pill"><span class="live-dot"></span><span id="online-count">12 online</span></div>
+      <div id="live-pill" class="live-pill hidden"><span class="live-dot"></span><span id="online-count">checking…</span></div>
       <div id="streak-pill" class="streak-pill" title="consecutive sub-350ms hits">🔥 <span id="streak-count">0</span></div>
     </div>
   </div>
   <div id="challenge-pill" class="challenge-pill">🎯 daily: <b id="challenge-text">3× sub-300ms</b> <span id="challenge-progress">0/3</span></div>
-  <div id="rival-banner" class="rival-banner hidden">👻 chasing <b id="rival-name">—</b> <span id="rival-gap" class="rival-gap"></span></div>
+  </div>
 
   <main id="stage" class="stage stage--idle" role="button" tabindex="0">
     <div id="cursor-aura" aria-hidden="true"></div>
@@ -110,7 +111,8 @@
     </div>
   </main>
 
-  <div class="live-strip" aria-live="polite">
+  <div class="bottom-chrome">
+  <div class="live-strip" aria-live="polite" hidden>
     <span class="live-tag">LIVE</span>
     <div class="ticker-mask"><div id="ticker" class="ticker">warming up the roulette…</div></div>
   </div>
@@ -134,6 +136,7 @@
     <canvas id="sparkline" width="600" height="120"></canvas>
     <div id="analytics-meta" class="analytics-meta"></div>
   </div>
+  </div>
 </div>
 
 <div id="leaderboard" class="overlay hidden">
@@ -147,9 +150,14 @@
     </div>
     <p class="board-note">fastest reaction wins. everyone who plays shows up here.</p>
     <div id="podium" class="podium"></div>
-    <button id="board-expand" class="board-expand">show all</button>
-    <div class="activity-head">⚡ live activity</div>
-    <div id="activity-feed" class="activity-feed"></div>
+    <div class="board-tabs" role="tablist" aria-label="leaderboard scope">
+      <button id="board-tab-top" class="board-tab is-active" role="tab" aria-selected="true">Top 10</button>
+      <button id="board-tab-all" class="board-tab" role="tab" aria-selected="false">Everyone</button>
+    </div>
+    <div id="activity-section" class="activity-section" hidden>
+      <div class="activity-head">⚡ live activity</div>
+      <div id="activity-feed" class="activity-feed"></div>
+    </div>
     <ol id="board-list" class="board-list"></ol>
     <p id="board-status" class="board-note"></p>
     <a id="board-tweet" class="tweet-btn hidden" href="#" target="_blank" rel="noopener">𝕏 tweet your score</a>

@@ -5,7 +5,7 @@
   --line-strong: rgba(255,255,255,0.18);
   --text: #f2f2f5;
   --text-dim: #9797a6;
-  --text-faint: #5c5c6b;
+  --text-faint: #898998;
   --go: #37e08c;
   --go-dim: #163f2b;
   --wait: #ff5c5c;
@@ -142,6 +142,7 @@ html, body {
   font-size: 13px;
   font-weight: 500;
   padding: 10px 16px;
+  min-height: 44px;
   border-radius: 999px;
   cursor: pointer;
   font-family: inherit;
@@ -189,6 +190,16 @@ html, body {
 .stage--early { background: var(--warn-dim); }
 .stage--early .stage-text, .stage--early .stage-sub { color: var(--warn); }
 
+.stage--best { background: var(--go-dim); border: 1px solid var(--go); }
+.stage--best .stage-text, .stage--best .stage-sub { color: var(--go); }
+.stage--best .stage-text { animation: best-pulse 0.6s ease 2; }
+
+@keyframes best-pulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.07); }
+  100% { transform: scale(1); }
+}
+
 /* ---- stat bar ---- */
 .statbar {
   display: flex;
@@ -227,13 +238,18 @@ html, body {
 }
 
 .icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
   background: none;
   border: none;
   color: var(--text-dim);
   font-size: 24px;
   line-height: 1;
   cursor: pointer;
-  padding: 4px 8px;
+  padding: 0;
 }
 
 .board-note {
@@ -288,18 +304,6 @@ html, body {
   text-align: center;
 }
 
-.text-btn {
-  background: none;
-  border: none;
-  color: var(--text-faint);
-  font-size: 13px;
-  cursor: pointer;
-  padding: 12px 0 0;
-  font-family: inherit;
-}
-
-.text-btn:active { color: var(--wait); }
-
 .tweet-btn {
   display: block;
   text-align: center;
@@ -316,3 +320,13 @@ html, body {
 }
 
 .tweet-btn:active { background: var(--line); }
+
+.result-share { margin-top: 18px; }
+
+.result-note {
+  font-size: 12px;
+  color: var(--wait);
+  margin: 10px 0 0;
+}
+
+.result-note:empty { margin: 0; }

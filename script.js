@@ -3,6 +3,7 @@
 
   const STORAGE_NAME = "rsr_player_name";
   const MAX_BOARD_ENTRIES = 10;
+  const DEPLOYED_URL = "https://timiretimzzy.github.io/speed-roulette/";
 
   // ---- elements ----
   const nameGate = document.getElementById("name-gate");
@@ -16,6 +17,8 @@
   const stage = document.getElementById("stage");
   const stageText = document.getElementById("stage-text");
   const stageSub = document.getElementById("stage-sub");
+  const resultShare = document.getElementById("result-share");
+  const resultNote = document.getElementById("result-note");
 
   const statLast = document.getElementById("stat-last");
   const statBest = document.getElementById("stat-best");
@@ -41,11 +44,18 @@
   const configured =
     cfg.SUPABASE_URL &&
     cfg.SUPABASE_ANON_KEY &&
-    cfg.SUPABASE_URL !== "YOUR_SUPABASE_URL";
+    cfg.SUPABASE_URL !== "YOUR_SUPABASE_URL" &&
+    cfg.SUPABASE_ANON_KEY !== "YOUR_SUPABASE_ANON_KEY";
 
   let supabase = null;
-  if (configured && window.supabase) {
-    supabase = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY);
+  if (configured) {
+    if (window.supabase) {
+      supabase = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY);
+    } else {
+      console.warn("Supabase JS SDK not loaded (CDN blocked?). Falling back to local.");
+    }
+  } else {
+    console.warn("Supabase not configured. Falling back to local.");
   }
 
   // ---- leaderboard: shared (Supabase) with localStorage fallback ----
@@ -64,11 +74,36 @@
     localStorage.setItem(LOCAL_KEY, JSON.stringify(entries));
   }
 
+  function vibrate(pattern) {
+    if (typeof navigator !== "undefined" && navigator.vibrate) {
+      try { navigator.vibrate(pattern); } catch (_) { }
+    }
+  }
+
+  function tweetHref(text) {
+    return (
+      "https://twitter.com/intent/tweet?text=" + encodeURIComponent(text) +
+      "&url=" + encodeURIComponent(DEPLOYED_URL)
+    );
+  }
+
+  function shareText(ms, isBest) {
+    if (isBest) {
+      return "New personal best: " + ms + "ms on Reaction Speed Roulette. Beat it.";
+    }
+    return "I scored " + ms + "ms on Reaction Speed Roulette. Think you can beat me?";
+  }
+
   async function submitScore(name, ms) {
     if (supabase) {
       const { error } = await supabase.from("scores").insert({ name, ms });
-      if (error) console.error("Supabase insert failed:", error.message);
-      return;
+      if (error) {
+        console.error("Supabase insert failed:", error.message);
+        resultNote.textContent = "couldn't save your score — check your connection.";
+        return false;
+      }
+      resultNote.textContent = "";
+      return true;
     }
     const entries = loadLocalBoard();
     const existing = entries.find((e) => e.name === name);
@@ -79,6 +114,8 @@
     }
     entries.sort((a, b) => a.ms - b.ms);
     saveLocalBoard(entries.slice(0, MAX_BOARD_ENTRIES));
+    resultNote.textContent = "";
+    return true;
   }
 
   async function fetchBoard() {
@@ -113,10 +150,7 @@
     boardStatus.textContent = "";
     const { entries, mode } = await fetchBoard();
 
-    if (mode === "local") {
-      boardStatus.textContent =
-        "no backend configured yet — showing scores from this device only. see README.md.";
-    } else if (mode === "error") {
+    if (mode === "error") {
       boardStatus.textContent = "couldn't reach the leaderboard right now.";
     }
 
@@ -138,10 +172,9 @@
 
     const mine = entries.find((e) => e.name === playerName);
     if (mine) {
-      const text =
-        "I scored " + mine.ms + "ms on Reaction Speed Roulette, you think you can beat me?";
-      boardTweet.href =
-        "https://twitter.com/intent/tweet?text=" + encodeURIComponent(text);
+      boardTweet.href = tweetHref(
+        "I scored " + mine.ms + "ms on Reaction Speed Roulette. Think you can beat me?"
+      );
       boardTweet.classList.remove("hidden");
     } else {
       boardTweet.classList.add("hidden");
@@ -192,6 +225,8 @@
 
   function armRound() {
     gameState = "waiting";
+    resultShare.classList.add("hidden");
+    resultNote.textContent = "";
     setStage("wait", "wait for it...", "don't tap yet");
     const delay = 800 + Math.random() * 2500;
     armTimer = setTimeout(() => {
@@ -203,23 +238,32 @@
 
   async function registerHit() {
     const ms = Math.round(performance.now() - readyAt);
+    const isBest = sessionBest === null || ms < sessionBest;
     rounds += 1;
     statRounds.textContent = rounds;
     statLast.textContent = ms + "ms";
 
-    if (sessionBest === null || ms < sessionBest) {
+    if (isBest) {
       sessionBest = ms;
       statBest.textContent = sessionBest + "ms";
+      vibrate([40, 60, 40]);
+      setStage("best", ms + "ms — new personal best", "tap to go again");
+    } else {
+      vibrate(25);
+      setStage("idle", ms + "ms — tap to go again", "can you beat that?");
     }
 
+    resultShare.href = tweetHref(shareText(ms, isBest));
+    resultShare.classList.remove("hidden");
+
     gameState = "idle";
-    setStage("idle", ms + "ms — tap to go again", "can you beat that?");
     await submitScore(playerName, ms);
   }
 
   function registerEarlyTap() {
     clearTimeout(armTimer);
     gameState = "idle";
+    resultShare.classList.add("hidden");
     setStage("early", "too soon", "tap to try again");
   }
 
@@ -232,6 +276,8 @@
       registerHit();
     }
   });
+
+  resultShare.addEventListener("click", (e) => e.stopPropagation());
 
   // ---- leaderboard overlay ----
   boardToggle.addEventListener("click", () => {

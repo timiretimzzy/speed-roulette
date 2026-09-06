@@ -26,6 +26,7 @@
   const boardClose = document.getElementById("board-close");
   const boardList = document.getElementById("board-list");
   const boardStatus = document.getElementById("board-status");
+  const boardTweet = document.getElementById("board-tweet");
 
   // ---- game state ----
   let playerName = "";
@@ -134,6 +135,17 @@
       li.querySelector(".board-name").textContent = entry.name;
       boardList.appendChild(li);
     });
+
+    const mine = entries.find((e) => e.name === playerName);
+    if (mine) {
+      const text =
+        "I scored " + mine.ms + "ms on Reaction Speed Roulette, you think you can beat me?";
+      boardTweet.href =
+        "https://twitter.com/intent/tweet?text=" + encodeURIComponent(text);
+      boardTweet.classList.remove("hidden");
+    } else {
+      boardTweet.classList.add("hidden");
+    }
   }
 
   // ---- name gate ----

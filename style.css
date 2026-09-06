@@ -299,3 +299,20 @@ html, body {
 }
 
 .text-btn:active { color: var(--wait); }
+
+.tweet-btn {
+  display: block;
+  text-align: center;
+  margin: 16px 0 0;
+  padding: 12px 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+  font-family: inherit;
+  transition: background 0.08s ease;
+}
+
+.tweet-btn:active { background: var(--line); }

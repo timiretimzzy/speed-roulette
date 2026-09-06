@@ -2,8 +2,9 @@
   "use strict";
 
   const STORAGE_NAME = "rsr_player_name";
+  const DEVICE_KEY = "rsr_device_id";
   const MAX_BOARD_ENTRIES = 10;
-  const DEPLOYED_URL = "https://timiretimzzy.github.io/speed-roulette/";
+  const DEPLOYED_URL = "https://reaction-speed-roulette.vercel.app/";
 
   // ---- elements ----
   const nameGate = document.getElementById("name-gate");
@@ -30,6 +31,7 @@
   const boardList = document.getElementById("board-list");
   const boardStatus = document.getElementById("board-status");
   const boardTweet = document.getElementById("board-tweet");
+  const boardExpand = document.getElementById("board-expand");
 
   // ---- game state ----
   let playerName = "";
@@ -38,6 +40,7 @@
   let readyAt = 0;
   let sessionBest = null;
   let rounds = 0;
+  let boardExpanded = false;
 
   // ---- supabase client ----
   const cfg = window.RSR_CONFIG || {};
@@ -73,6 +76,17 @@
   function saveLocalBoard(entries) {
     localStorage.setItem(LOCAL_KEY, JSON.stringify(entries));
   }
+
+  function getDeviceId() {
+    let id = localStorage.getItem(DEVICE_KEY);
+    if (!id) {
+      id = crypto.randomUUID();
+      localStorage.setItem(DEVICE_KEY, id);
+    }
+    return id;
+  }
+
+  const deviceId = getDeviceId();
 
   function vibrate(pattern) {
     if (typeof navigator !== "undefined" && navigator.vibrate) {
@@ -119,27 +133,35 @@
   }
 
   async function fetchBoard() {
-    if (supabase) {
-      // Pull a generous batch of recent-ish rows, then keep each player's
-      // best attempt client-side. Keeps the schema and permissions dead simple:
-      // the anon key only ever needs INSERT + SELECT, never UPDATE/DELETE.
-      const { data, error } = await supabase
+    // Aggregates each player's best score client-side, then returns the list
+    // sorted ascending by best time. We always fetch the full set so the
+    // top-10 view isn't skewed by a player's worse attempts crowding out the
+    // first rows; the expanded view is the same data without the cap.
+    async function query() {
+      return await supabase
         .from("scores")
         .select("name, ms")
-        .order("ms", { ascending: true })
-        .limit(500);
-      if (error) {
-        console.error("Supabase fetch failed:", error.message);
-        return { entries: [], mode: "error" };
-      }
+        .order("ms", { ascending: true });
+    }
+
+    function aggregate(data) {
       const bestByName = new Map();
       for (const row of data) {
         const current = bestByName.get(row.name);
         if (current === undefined || row.ms < current) bestByName.set(row.name, row.ms);
       }
-      const entries = Array.from(bestByName, ([name, ms]) => ({ name, ms }))
-        .sort((a, b) => a.ms - b.ms)
-        .slice(0, MAX_BOARD_ENTRIES);
+      return Array.from(bestByName, ([name, ms]) => ({ name, ms }))
+        .sort((a, b) => a.ms - b.ms);
+    }
+
+    if (supabase) {
+      const { data, error } = await query();
+      if (error) {
+        console.error("Supabase fetch failed:", error.message);
+        return { entries: [], mode: "error" };
+      }
+      let entries = aggregate(data);
+      if (!boardExpanded) entries = entries.slice(0, MAX_BOARD_ENTRIES);
       return { entries, mode: "shared" };
     }
     return { entries: loadLocalBoard(), mode: "local" };
@@ -182,11 +204,62 @@
   }
 
   // ---- name gate ----
+  async function loadPersonalBest(name) {
+    if (!supabase) return;
+    const { data, error } = await supabase
+      .from("scores")
+      .select("ms")
+      .eq("name", name)
+      .order("ms", { ascending: true })
+      .limit(1);
+    if (error) return;
+    if (data && data.length > 0) {
+      sessionBest = data[0].ms;
+      statBest.textContent = sessionBest + "ms";
+    }
+  }
+
   function showApp(name) {
     playerName = name;
     playerNameEl.textContent = name;
     nameGate.classList.add("hidden");
     app.classList.remove("hidden");
+    loadPersonalBest(name);
+  }
+
+  async function claimName(value) {
+    const lower = value.toLowerCase();
+    if (!supabase) return { ok: true };
+
+    const { data, error } = await supabase
+      .from("players")
+      .select("name, device_id")
+      .eq("name_lower", lower)
+      .limit(1);
+    if (error) {
+      console.error("players lookup failed:", error.message);
+      return { ok: true, network: true };
+    }
+
+    if (data && data.length > 0) {
+      const existing = data[0];
+      if (existing.device_id === deviceId) {
+        return { ok: true };
+      }
+      return { ok: false, taken: true };
+    }
+
+    const { error: insertError } = await supabase
+      .from("players")
+      .insert({ name: value, name_lower: lower, device_id: deviceId });
+    if (insertError) {
+      if (String(insertError.code) === "23505") {
+        return { ok: false, taken: true };
+      }
+      console.error("players insert failed:", insertError.message);
+      return { ok: true, network: true };
+    }
+    return { ok: true };
   }
 
   function handleNameSubmit() {
@@ -199,9 +272,15 @@
       nameError.textContent = "keep it under 18 characters.";
       return;
     }
-    nameError.textContent = "";
-    localStorage.setItem(STORAGE_NAME, value);
-    showApp(value);
+    claimName(value).then((res) => {
+      if (!res.ok && res.taken) {
+        nameError.textContent = "That name is taken — try another.";
+        return;
+      }
+      nameError.textContent = "";
+      localStorage.setItem(STORAGE_NAME, value);
+      showApp(value);
+    });
   }
 
   nameSubmit.addEventListener("click", handleNameSubmit);
@@ -267,13 +346,25 @@
     setStage("early", "too soon", "tap to try again");
   }
 
-  stage.addEventListener("click", () => {
+  function stageAction() {
     if (gameState === "idle") {
       armRound();
     } else if (gameState === "waiting") {
       registerEarlyTap();
     } else if (gameState === "ready") {
       registerHit();
+    }
+  }
+
+  stage.addEventListener("click", stageAction);
+
+  document.addEventListener("keydown", (e) => {
+    if (nameGate.classList.contains("hidden") === false) return;
+    if (e.key === " " || e.key === "Enter") {
+      const tag = document.activeElement && document.activeElement.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "BUTTON" || tag === "A") return;
+      e.preventDefault();
+      stageAction();
     }
   });
 
@@ -282,6 +373,14 @@
   // ---- leaderboard overlay ----
   boardToggle.addEventListener("click", () => {
     boardOverlay.classList.remove("hidden");
+    boardExpanded = false;
+    boardExpand.textContent = "show all";
+    renderBoard();
+  });
+
+  boardExpand.addEventListener("click", () => {
+    boardExpanded = !boardExpanded;
+    boardExpand.textContent = boardExpanded ? "top 10" : "show all";
     renderBoard();
   });
 

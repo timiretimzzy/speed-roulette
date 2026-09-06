@@ -258,6 +258,23 @@ html, body {
   margin: 0 0 16px;
 }
 
+.board-expand {
+  align-self: flex-start;
+  border: 1px solid var(--line-strong);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 13px;
+  font-weight: 500;
+  padding: 8px 16px;
+  min-height: 44px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-family: inherit;
+  margin: 0 0 4px;
+}
+
+.board-expand:active { background: var(--line); }
+
 .board-list {
   list-style: none;
   margin: 0;

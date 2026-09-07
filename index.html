@@ -87,20 +87,27 @@
     </div>
   </div>
   <div id="challenge-pill" class="challenge-pill">🎯 daily: <b id="challenge-text">3× sub-300ms</b> <span id="challenge-progress">0/3</span></div>
+  <div class="round-strip" id="round-strip">
+    <div class="round-head">
+      <span class="round-tag">round</span>
+      <span id="round-game-label" class="round-game-label">game 1/5</span>
+      <span class="round-avg-chip"><span id="round-avg-val">–</span><span class="round-avg-tag">avg</span></span>
+    </div>
+    <div class="round-slots" id="round-slots">
+      <span class="round-slot" data-slot="0"><b>1</b><i>–</i></span>
+      <span class="round-slot" data-slot="1"><b>2</b><i>–</i></span>
+      <span class="round-slot" data-slot="2"><b>3</b><i>–</i></span>
+      <span class="round-slot" data-slot="3"><b>4</b><i>–</i></span>
+      <span class="round-slot" data-slot="4"><b>5</b><i>–</i></span>
+    </div>
+    <p class="round-note">your score is the average of your 5 games</p>
+  </div>
   </div>
 
-  <main id="stage" class="stage stage--idle" role="button" tabindex="0">
+  <main id="stage" class="stage" role="button" tabindex="0" aria-label="reaction game: tap to arm, then tap the instant it turns green">
+    <canvas id="stage-canvas" aria-hidden="true"></canvas>
     <div id="cursor-aura" aria-hidden="true"></div>
-    <div class="ring" aria-hidden="true">
-      <div class="ring-spin"></div>
-      <div class="ring-ticks"></div>
-    </div>
-    <div class="stage-glow" aria-hidden="true"></div>
-    <div class="stage-inner">
-      <div id="stage-icon" class="stage-icon">◉</div>
-      <div id="stage-tier" class="tier hidden"></div>
-      <div id="stage-text" class="stage-text">tap to arm</div>
-      <div id="stage-sub" class="stage-sub">then wait for green</div>
+    <div class="stage-ui">
       <a id="result-share" class="tweet-btn result-share hidden" href="#" target="_blank" rel="noopener">𝕏 tweet this</a>
       <div id="result-actions" class="result-actions hidden">
         <button id="share-card-btn" class="chip-btn" aria-label="share result as image card">🖼 share card</button>
@@ -148,7 +155,7 @@
       </div>
       <button id="board-close" class="icon-btn" aria-label="close leaderboard">×</button>
     </div>
-    <p class="board-note">fastest reaction wins. everyone who plays shows up here.</p>
+    <p class="board-note">fastest average of 5 games wins. everyone who plays shows up here.</p>
     <div id="podium" class="podium"></div>
     <div class="board-tabs" role="tablist" aria-label="leaderboard scope">
       <button id="board-tab-top" class="board-tab is-active" role="tab" aria-selected="true">Top 10</button>

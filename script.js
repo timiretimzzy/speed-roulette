@@ -9,8 +9,9 @@
   const BOARD_PAGE_SIZE = 200;
   const RECONNECT_MS = 30 * 1000;
   const DEPLOYED_URL = "https://reaction-speed-roulette.vercel.app/";
+  const ROUND_SIZE = 5;
 
-  // ---- elements (all original IDs preserved) ----
+  // ---- elements ----
   const nameGate = document.getElementById("name-gate");
   const nameInput = document.getElementById("name-input");
   const nameSubmit = document.getElementById("name-submit");
@@ -22,14 +23,15 @@
   const playerAvatarMain = document.getElementById("player-avatar-main");
 
   const stage = document.getElementById("stage");
-  const stageText = document.getElementById("stage-text");
-  const stageSub = document.getElementById("stage-sub");
-  const stageIcon = document.getElementById("stage-icon");
-  const stageTier = document.getElementById("stage-tier");
+  const stageCanvas = document.getElementById("stage-canvas");
+  const roundGameLabel = document.getElementById("round-game-label");
+  const roundAvgVal = document.getElementById("round-avg-val");
+  const roundSlots = Array.prototype.slice.call(document.querySelectorAll("#round-slots .round-slot"));
   const resultShare = document.getElementById("result-share");
   const resultNote = document.getElementById("result-note");
   const flash = document.getElementById("flash");
   const confettiCanvas = document.getElementById("confetti");
+  const cursorAura = document.getElementById("cursor-aura");
 
   const statLast = document.getElementById("stat-last");
   const statBest = document.getElementById("stat-best");
@@ -46,7 +48,6 @@
   const boardTabTop = document.getElementById("board-tab-top");
   const boardTabAll = document.getElementById("board-tab-all");
 
-  // ---- gamification elements ----
   const levelLabel = document.getElementById("level-label");
   const xpFill = document.getElementById("xp-fill");
   const xpLabel = document.getElementById("xp-label");
@@ -62,27 +63,35 @@
 
   // ---- game state ----
   let playerName = "";
-  let gameState = "idle"; // idle | waiting | ready
-  let armTimer = null;
+  let mode = "idle"; // idle | waiting | ready | early | round
+  let roundsDone = 0;
+  let roundGames = []; // { ms, hitFrame, goFrame }
+  let goAt = 0;
   let readyAt = 0;
+  let lastRoundAvg = null;
   let sessionBest = null;
-  let rounds = 0;
-  let lastMs = null;
   let boardMode = "top10";
   let lastRank = null;
   let localMode = false;
+  let frameCount = 0;
+  let stagePhase = { title: "", sub: "" };
+  let lastHitAvg = null;
 
   // ---- gamification state (localStorage) ----
   let game = loadGame();
   function loadGame() {
     try {
       const raw = localStorage.getItem(GAME_KEY);
-      if (raw) return Object.assign(defaultGame(), JSON.parse(raw));
+      if (raw) {
+        const g = Object.assign(defaultGame(), JSON.parse(raw));
+        if (typeof g.rounds !== "number") g.rounds = g.totalHits || 0;
+        return g;
+      }
     } catch (_) {}
     return defaultGame();
   }
   function defaultGame() {
-    return { xp: 0, streak: 0, bestStreak: 0, history: [], achievements: {}, challenge: dailyChallenge(), totalHits: 0 };
+    return { xp: 0, streak: 0, bestStreak: 0, history: [], achievements: {}, challenge: dailyChallenge(), rounds: 0 };
   }
   function saveGame() { try { localStorage.setItem(GAME_KEY, JSON.stringify(game)); } catch (_) {} }
   function dailyChallenge() {
@@ -92,7 +101,7 @@
       { id: "sub300x3", label: "3× sub-300ms", target: 300, count: 3 },
       { id: "sub250x2", label: "2× sub-250ms", target: 250, count: 2 },
       { id: "sub350x5", label: "5× sub-350ms", target: 350, count: 5 },
-      { id: "rounds10", label: "play 10 rounds", target: 9999, count: 10 },
+      { id: "rounds10", label: "complete 10 rounds", target: 9999, count: 10 },
     ];
     const g = goals[seed % goals.length];
     return { day, ...g, progress: 0, done: false };
@@ -129,9 +138,9 @@
 
   function vibrate(p) { if (navigator.vibrate) { try { navigator.vibrate(p); } catch (_) {} } }
   function tweetHref(t) { return "https://twitter.com/intent/tweet?text=" + encodeURIComponent(t) + "&url=" + encodeURIComponent(DEPLOYED_URL); }
-  function shareText(ms, isBest) {
-    return isBest ? "New personal best: " + ms + "ms on Reaction Speed Roulette. Beat it."
-      : "I scored " + ms + "ms on Reaction Speed Roulette. Think you can beat me?";
+  function shareText(avg, isBest) {
+    return isBest ? "New personal best: " + avg + "ms average on Reaction Speed Roulette. Beat it."
+      : "I averaged " + avg + "ms across 5 games on Reaction Speed Roulette. Think you can beat me?";
   }
 
   // ---- helpers: avatar, tier, toast, confetti ----
@@ -156,18 +165,11 @@
   }
 
   function tierFor(ms) {
-    if (ms < 200) return { label: "⚡ godlike", cls: "tier--god" };
-    if (ms < 250) return { label: "🔥 elite", cls: "tier--elite" };
-    if (ms < 350) return { label: "✦ solid", cls: "tier--solid" };
-    return { label: "keep pushing", cls: "tier--meh" };
+    if (ms < 200) return { label: "⚡ godlike", cls: "god" };
+    if (ms < 250) return { label: "🔥 elite", cls: "elite" };
+    if (ms < 350) return { label: "✦ solid", cls: "solid" };
+    return { label: "keep pushing", cls: "meh" };
   }
-  function showTier(ms) {
-    if (!stageTier) return;
-    const t = tierFor(ms);
-    stageTier.className = "tier " + t.cls;
-    stageTier.textContent = t.label + " · " + ms + "ms";
-  }
-  function hideTier() { if (stageTier) stageTier.className = "tier hidden"; }
 
   function toast(msg, ico, cls) {
     if (!toasts) return;
@@ -220,14 +222,14 @@
     })(t0);
   }
 
-  // ---- gamification: XP / levels / streaks / achievements ----
+  // ---- gamification: XP / levels / streaks / achievements (round averages) ----
   function levelFor(xp) { return Math.floor(Math.sqrt(xp / 100)) + 1; }
   function xpForLevel(lvl) { return Math.pow(lvl - 1, 2) * 100; }
-  function xpGain(ms) {
-    if (ms < 200) return 60;
-    if (ms < 250) return 40;
-    if (ms < 300) return 25;
-    if (ms < 400) return 12;
+  function xpGain(avg) {
+    if (avg < 200) return 60;
+    if (avg < 250) return 40;
+    if (avg < 300) return 25;
+    if (avg < 400) return 12;
     return 6;
   }
   function renderGame() {
@@ -250,35 +252,34 @@
     toast(msg, ico || "🏅", "");
     vibrate([30, 50, 30]);
   }
-  function applyGamification(ms, isBest) {
+  function applyGamification(avg, isBest) {
     const beforeLvl = levelFor(game.xp);
-    game.xp += xpGain(ms);
-    game.totalHits++;
+    game.xp += xpGain(avg);
+    game.rounds++;
     const afterLvl = levelFor(game.xp);
-    // streak = consecutive sub-350 hits
-    if (ms < 350) { game.streak++; game.bestStreak = Math.max(game.bestStreak, game.streak); }
+    if (avg < 350) { game.streak++; game.bestStreak = Math.max(game.bestStreak, game.streak); }
     else game.streak = 0;
-    // challenge
     const ch = game.challenge;
     if (!ch.done) {
       if (ch.id === "rounds10") ch.progress++;
-      else if (ms <= ch.target) ch.progress++;
+      else if (avg <= ch.target) ch.progress++;
       if (ch.progress >= ch.count) { ch.done = true; game.xp += 50; toast("Daily complete! +50 XP 🎯", "🎯", ""); fireConfetti(50); }
     }
     renderGame();
     if (afterLvl > beforeLvl) { toast("Level up! You are now LVL " + afterLvl, "⚡", "toast--xp"); fireConfetti(110); }
-    else if (isBest) toast("+" + xpGain(ms) + " XP", "✦", "toast--xp");
-    if (game.streak === 3) toast("3-hit streak! You're on fire 🔥", "🔥", "toast--streak");
+    else if (isBest) toast("+" + xpGain(avg) + " XP", "✦", "toast--xp");
+    if (game.streak === 3) toast("3-round streak! You're on fire 🔥", "🔥", "toast--streak");
     if (game.streak === 5) unlock("streak5", "Achievement: 5 streak! 🔥");
     if (game.streak === 10) unlock("streak10", "Achievement: 10 streak — unstoppable! 🔥");
-    if (ms < 200) unlock("sub200", "Achievement: sub-200ms — godlike! ⚡");
-    else if (ms < 250) unlock("sub250", "Achievement: sub-250ms elite! 🔥");
-    if (game.totalHits === 10) unlock("rounds10", "Achievement: 10 rounds played! ◉");
-    if (game.totalHits === 50) unlock("rounds50", "Achievement: 50 rounds — grinder! ◉");
+    if (avg < 200) unlock("sub200", "Achievement: sub-200ms avg — godlike! ⚡");
+    else if (avg < 250) unlock("sub250", "Achievement: sub-250ms avg elite! 🔥");
+    if (game.rounds === 10) unlock("rounds10", "Achievement: 10 rounds completed! ◉");
+    if (game.rounds === 50) unlock("rounds50", "Achievement: 50 rounds — grinder! ◉");
   }
 
-  // ---- live feel: ticker, activity, online count (real data only) ----
+  // ---- live feel ----
   let liveEvents = [];
+  let liveChannel = null;
   function pushLive(html, fresh) {
     liveEvents.unshift({ html, t: Date.now(), fresh: !!fresh });
     liveEvents = liveEvents.slice(0, 12);
@@ -356,29 +357,29 @@
   setInterval(() => { if (!document.hidden) checkSupabaseHealth(); }, RECONNECT_MS);
 
   // ---- leaderboard (shared + local fallback) ----
-  function saveScoreLocal(name, ms) {
+  function saveScoreLocal(name, avg) {
     const entries = loadLocalBoard();
     const ex = entries.find((e) => e.name === name);
-    if (ex) { if (ms < ex.ms) ex.ms = ms; } else entries.push({ name, ms });
+    if (ex) { if (avg < ex.ms) ex.ms = avg; } else entries.push({ name, ms: avg });
     entries.sort((a, b) => a.ms - b.ms);
     saveLocalBoard(entries.slice(0, MAX_BOARD_ENTRIES));
     resultNote.textContent = "";
     return true;
   }
-  async function submitScore(name, ms) {
-    if (!Number.isInteger(ms)) return true;
+  async function submitScore(name, games, frames) {
+    const avg = Math.round(games.reduce((a, b) => a + b, 0) / games.length);
     if (supabase && !localMode) {
       try {
         const res = await fetch(cfg.SUPABASE_URL + "/functions/v1/submit-score", {
           method: "POST",
           headers: { "Content-Type": "application/json", "apikey": cfg.SUPABASE_ANON_KEY, "Authorization": "Bearer " + cfg.SUPABASE_ANON_KEY },
-          body: JSON.stringify({ name, ms }),
+          body: JSON.stringify({ name, games, frames }),
         });
         if (!res.ok) {
           console.error("submit-score rejected:", res.status);
           if (res.status !== 429 && res.status !== 400) {
             enterLocalMode("submit-score failed: " + res.status);
-            return saveScoreLocal(name, ms);
+            return saveScoreLocal(name, avg);
           }
           return false;
         }
@@ -387,10 +388,10 @@
       } catch (e) {
         console.error("submit-score failed:", e.message);
         enterLocalMode("submit-score failed: " + e.message);
-        return saveScoreLocal(name, ms);
+        return saveScoreLocal(name, avg);
       }
     }
-    return saveScoreLocal(name, ms);
+    return saveScoreLocal(name, avg);
   }
 
   async function fetchBoard() {
@@ -436,18 +437,17 @@
       const av = avatarFor(entry.name);
       li.innerHTML = '<span class="' + rankCls + '">' + medal(i) + '</span>' +
         '<span class="board-avatar" style="background:' + av.bg + '">' + escapeHtml(av.ch) + '</span>' +
-        '<span class="board-name"></span><span class="board-time">' + entry.ms + 'ms</span>';
+        '<span class="board-name"></span><span class="board-time">' + entry.ms + 'ms avg</span>';
       li.querySelector(".board-name").textContent = entry.name + (entry.name === playerName ? " (you)" : "");
       boardList.appendChild(li);
     });
-    // live rank toast
     const myIdx = entries.findIndex((e) => e.name === playerName);
     if (myIdx >= 0) {
       const rank = myIdx + 1;
       if (lastRank !== null && rank < lastRank) toast("You climbed to #" + rank + "! 🏆", "🏆", "toast--rank");
       lastRank = rank;
       const mine = entries[myIdx];
-      boardTweet.href = tweetHref("I scored " + mine.ms + "ms (#" + rank + ") on Reaction Speed Roulette. Think you can beat me?");
+      boardTweet.href = tweetHref("I averaged " + mine.ms + "ms (#" + rank + ") on Reaction Speed Roulette. Think you can beat me?");
       boardTweet.classList.remove("hidden");
     } else boardTweet.classList.add("hidden");
   }
@@ -475,9 +475,9 @@
     app.classList.remove("hidden");
     renderGame();
     loadPersonalBest(name);
-    if (game.totalHits > 0) {
-      statRounds.textContent = game.totalHits;
-      rounds = game.totalHits;
+    if (game.rounds > 0) {
+      statRounds.textContent = game.rounds;
+      roundsDone = game.rounds;
     }
   }
   async function claimName(value) {
@@ -558,102 +558,312 @@
   const savedName = localStorage.getItem(STORAGE_NAME);
   if (savedName) showApp(savedName); else nameInput.focus();
 
-  // ---- stage ----
-  const ICONS = { idle: "◉", wait: "⏳", go: "⚡", early: "✋", best: "👑" };
-  function setStage(mode, title, sub) {
-    stage.classList.remove("stage--idle", "stage--wait", "stage--go", "stage--early", "stage--best");
-    stage.classList.add("stage--" + mode);
-    stageText.textContent = title;
-    stageSub.textContent = sub;
-    if (stageIcon) stageIcon.textContent = ICONS[mode] || "◉";
-    if (mode === "wait" || mode === "go") hideTier();
+  // ---- audio ----
+  let audioOn = localStorage.getItem("rsr_sound") !== "off";
+  let actx = null;
+  function tone(freq, dur, type, gain, when) {
+    if (!audioOn) return;
+    try {
+      actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+      const t = actx.currentTime + (when || 0);
+      const o = actx.createOscillator(), g = actx.createGain();
+      o.type = type || "sine"; o.frequency.setValueAtTime(freq, t);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(gain || 0.12, t + 0.015);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.connect(g).connect(actx.destination); o.start(t); o.stop(t + dur + 0.05);
+    } catch (_) {}
+  }
+  function soundArm() { tone(220, 0.1, "sine", 0.05); }
+  function soundGo() { tone(880, 0.18, "square", 0.05); tone(1320, 0.22, "sine", 0.06, 0.02); }
+  function soundBest() { [523, 659, 784, 1046].forEach((f, i) => tone(f, 0.22, "triangle", 0.09, i * 0.07)); }
+  function soundEarly() { tone(160, 0.25, "sawtooth", 0.09); }
+
+  function paintSound() { if (soundToggle) { soundToggle.textContent = audioOn ? "🔊" : "🔇"; soundToggle.classList.toggle("off", !audioOn); } }
+  const soundToggle = document.getElementById("sound-toggle");
+  if (soundToggle) soundToggle.addEventListener("click", (e) => { e.stopPropagation(); audioOn = !audioOn; localStorage.setItem("rsr_sound", audioOn ? "on" : "off"); paintSound(); if (audioOn) tone(660, 0.12, "sine", 0.1); });
+  paintSound();
+
+  // ---- canvas stage ----
+  let sctx = null;
+  function sizeCanvas() {
+    if (!stageCanvas || !sctx) return;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const w = stageCanvas.clientWidth, h = stageCanvas.clientHeight;
+    if (!w || !h) return;
+    if (stageCanvas.width !== Math.round(w * dpr) || stageCanvas.height !== Math.round(h * dpr)) {
+      stageCanvas.width = Math.round(w * dpr);
+      stageCanvas.height = Math.round(h * dpr);
+    }
+    sctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  function rr(ctx, x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
+  function setPhase(title, sub) { stagePhase.title = title; stagePhase.sub = sub; }
+
+  function startGo() {
+    mode = "ready";
+    readyAt = performance.now();
+    soundGo();
+    vibrate(10);
   }
 
+  // ---- round + game flow ----
   function armRound() {
-    gameState = "waiting";
+    if (roundGames.length >= ROUND_SIZE) roundGames = [];
+    const fresh = roundGames.length === 0;
     resultShare.classList.add("hidden");
     resultNote.textContent = "";
-    hideTier();
-    setStage("wait", "wait for it...", "don't tap yet");
-    const delay = 800 + Math.random() * 2500;
-    armTimer = setTimeout(() => {
-      gameState = "ready";
-      readyAt = performance.now();
-      setStage("go", "tap now!", "as fast as you can");
-      vibrate(10);
-    }, delay);
+    mode = "waiting";
+    setPhase("wait for it...", "don't tap yet");
+    goAt = performance.now() + (900 + Math.random() * 2400);
+    soundArm();
+    if (fresh) resetRoundStrip();
+    if (roundGameLabel) roundGameLabel.textContent = "game " + (roundGames.length + 1) + "/" + ROUND_SIZE;
   }
 
-  async function registerHit() {
-    const ms = Math.round(performance.now() - readyAt);
-    gameState = "idle";
-    const isBest = sessionBest === null || ms < sessionBest;
-    const prevBest = sessionBest;
-    rounds++;
-    statRounds.textContent = rounds;
-    // trend vs last
-    if (trendLast) {
-      if (lastMs === null) trendLast.textContent = "";
-      else if (ms < lastMs) { trendLast.textContent = "▲ " + (lastMs - ms) + "ms"; trendLast.className = "trend up"; }
-      else if (ms > lastMs) { trendLast.textContent = "▼ +" + (ms - lastMs) + "ms"; trendLast.className = "trend down"; }
-    }
-    // count-up animation from lastMs or 0
-    countUp(statLast, lastMs || 0, ms);
-    lastMs = ms;
-    doFlash();
-
-    if (isBest) {
-      sessionBest = ms;
-      countUp(statBest, prevBest || 0, ms);
-      if (bestCrown) bestCrown.classList.remove("hidden");
-      vibrate([40, 60, 40]);
-      setStage("best", ms + "ms — new best!", "tap to go again");
-      showTier(ms);
-      fireConfetti(120);
-      toast("New personal best: " + ms + "ms! 👑", "👑", "toast--best");
-    } else {
-      vibrate(25);
-      setStage("idle", ms + "ms — tap to go again", sessionBest ? "best " + sessionBest + "ms · can you beat it?" : "can you beat that?");
-      showTier(ms);
-    }
-    resultShare.href = tweetHref(shareText(ms, isBest));
-    resultShare.classList.remove("hidden");
-
-    applyGamification(ms, isBest);
-    pushLive("<b>" + escapeHtml(playerName) + "</b> just hit <span class='ms'>" + ms + "ms</span>" + (isBest ? " 👑" : ""), true);
-    game.history.push({ ms, t: Date.now() });
-    game.history = game.history.slice(-30);
-    saveGame();
-    await submitScore(playerName, ms);
+  function resetRoundStrip() {
+    roundSlots.forEach((slot) => {
+      slot.classList.remove("done", "low");
+      const label = slot.querySelector("i");
+      if (label) label.textContent = "–";
+    });
+    if (roundAvgVal) roundAvgVal.textContent = "–";
   }
 
   function registerEarlyTap() {
-    clearTimeout(armTimer);
-    gameState = "idle";
-    game.streak = 0; saveGame(); renderGame();
-    resultShare.classList.add("hidden");
-    hideTier();
+    mode = "idle";
     vibrate([80, 40, 80]);
-    setStage("early", "too soon!", "tap to try again");
+    soundEarly();
+    setPhase("too soon!", "tap to try again");
     toast("Too soon! Wait for green ✋", "✋", "");
   }
 
-  function stageAction() {
-    if (gameState === "idle") armRound();
-    else if (gameState === "waiting") registerEarlyTap();
-    else registerHit();
-  }
-  stage.addEventListener("click", stageAction);
-  document.addEventListener("keydown", (e) => {
-    if (!nameGate.classList.contains("hidden")) return;
-    if (e.key === " " || e.key === "Enter") {
-      const tag = document.activeElement && document.activeElement.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "BUTTON" || tag === "A") return;
-      e.preventDefault();
-      stageAction();
+  function registerHit() {
+    const ms = Math.max(1, Math.round(performance.now() - readyAt));
+    const hitFrame = frameCount;
+    const entry = { ms, hitFrame, goFrame: lastGoFrame };
+    roundGames.push(entry);
+    updateRoundStrip();
+    mode = "idle";
+
+    if (roundGames.length >= ROUND_SIZE) {
+      completeRound();
+    } else {
+      const n = roundGames.length;
+      const soFar = Math.round(roundGames.reduce((a, b) => a + b.ms, 0) / n);
+      lastHitAvg = soFar;
+      setPhase(n + "/" + ROUND_SIZE + " done", "your running avg is " + soFar + "ms — tap to arm next");
+      if (roundGameLabel) roundGameLabel.textContent = "game " + (roundGames.length + 1) + "/" + ROUND_SIZE;
     }
-  });
+  }
+
+  function updateRoundStrip() {
+    roundGames.forEach((g, i) => {
+      const slot = roundSlots[i];
+      if (!slot) return;
+      const low = g.ms <= 5;
+      slot.classList.remove("done", "low");
+      slot.classList.add(low ? "low" : "done");
+      slot.querySelector("i").textContent = g.ms + "ms";
+    });
+    const n = roundGames.length;
+    if (roundAvgVal) roundAvgVal.textContent = n ? Math.round(roundGames.reduce((a, b) => a + b.ms, 0) / n) + "ms" : "–";
+  }
+
+  function completeRound() {
+    const games = roundGames.map((g) => g.ms);
+    const frames = roundGames.map((g) => Math.max(0, g.hitFrame - g.goFrame));
+    const avg = Math.round(games.reduce((a, b) => a + b, 0) / games.length);
+
+    roundsDone++;
+    statRounds.textContent = roundsDone;
+    game.rounds = roundsDone;
+
+    const isBest = sessionBest === null || avg < sessionBest;
+    const prevBest = sessionBest;
+    if (isBest) {
+      sessionBest = avg;
+      countUp(statBest, prevBest || 0, avg);
+      if (bestCrown) bestCrown.classList.remove("hidden");
+    }
+    countUp(statLast, lastRoundAvg || 0, avg);
+    if (trendLast) {
+      if (lastRoundAvg === null) trendLast.textContent = "";
+      else if (avg < lastRoundAvg) { trendLast.textContent = "▲ " + (lastRoundAvg - avg) + "ms"; trendLast.className = "trend up"; }
+      else if (avg > lastRoundAvg) { trendLast.textContent = "▼ +" + (avg - lastRoundAvg) + "ms"; trendLast.className = "trend down"; }
+    }
+    lastRoundAvg = avg;
+    lastHitAvg = avg;
+
+    game.history.push({ ms: avg, t: Date.now() });
+    game.history = game.history.slice(-30);
+    saveGame();
+
+    if (isBest) {
+      vibrate([40, 60, 40]);
+      soundBest();
+      setPhase(avg + "ms — new best avg!", "5 games averaged · tap to play again");
+      fireConfetti(120);
+      toast("New best average: " + avg + "ms! 👑", "👑", "toast--best");
+    } else {
+      vibrate(25);
+      setPhase(avg + "ms average", "across 5 games · tap to play again");
+    }
+
+    resultShare.href = tweetHref(shareText(avg, isBest));
+    resultShare.classList.remove("hidden");
+    doFlash();
+    applyGamification(avg, isBest);
+    pushLive("<b>" + escapeHtml(playerName) + "</b> just averaged <span class='ms'>" + avg + "ms</span> across 5 games" + (isBest ? " 👑" : ""), true);
+
+    submitScore(playerName, games, frames).then((saved) => {
+      if (saved === false) {
+        resultNote.textContent = "couldn't record that round — tap to retry.";
+      } else {
+        resultNote.textContent = "";
+      }
+    });
+  }
+
+  function stageAction() {
+    if (mode === "idle") armRound();
+    else if (mode === "waiting") registerEarlyTap();
+    else if (mode === "ready") registerHit();
+  }
+
+  // ---- canvas render loop ----
+  let lastGoFrame = -1;
+  function draw() {
+    frameCount++;
+    sizeCanvas();
+    if (mode === "waiting" && performance.now() >= goAt) {
+      lastGoFrame = frameCount;
+      startGo();
+    }
+    renderStage();
+    requestAnimationFrame(draw);
+  }
+
+  function renderStage() {
+    if (!sctx) return;
+    const W = stageCanvas.width / Math.min(2, window.devicePixelRatio || 1) || stageCanvas.clientWidth;
+    const H = stageCanvas.height / Math.min(2, window.devicePixelRatio || 1) || stageCanvas.clientHeight;
+    sctx.clearRect(0, 0, W, H);
+    const t = performance.now() / 1000;
+    const cs = getComputedStyle(document.documentElement);
+
+    let bgTop, bgBottom, glowColor, accent, ringColor, ringSpeed, titleFont, titleColor, pulse;
+    if (mode === "waiting") { bgTop = "#5a1818"; bgBottom = "#2a0d0d"; glowColor = "rgba(255,92,92,0.45)"; accent = "#ff5c5c"; ringColor = "rgba(255,92,92,0.6)"; ringSpeed = 1.1; pulse = 0.9; }
+    else if (mode === "ready") { bgTop = "#0f7a48"; bgBottom = "#08351f"; glowColor = "rgba(55,224,140,0.6)"; accent = "#37e08c"; ringColor = "rgba(55,224,140,0.85)"; ringSpeed = 0; pulse = 1.4; }
+    else if (mode === "early") { bgTop = "#5c3d10"; bgBottom = "#2a1d08"; glowColor = "rgba(255,180,68,0.3)"; accent = "#ffb444"; ringColor = "rgba(255,180,68,0.4)"; ringSpeed = 0.8; pulse = 1; }
+    else { bgTop = "#22263e"; bgBottom = "#12121e"; glowColor = "rgba(139,132,255,0.3)"; accent = cs.getPropertyValue("--accent") || "#8b84ff"; ringColor = "rgba(255,255,255,0.18)"; ringSpeed = 0.15; pulse = 1; }
+
+    const g = sctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, bgTop); g.addColorStop(1, bgBottom);
+    sctx.fillStyle = g;
+    sctx.fillRect(0, 0, W, H);
+
+    // glow
+    const rad = Math.max(W, H) * 0.6;
+    const gg = sctx.createRadialGradient(W / 2, H * 0.55, 0, W / 2, H * 0.55, rad);
+    gg.addColorStop(0, glowColor); gg.addColorStop(1, "transparent");
+    sctx.fillStyle = gg;
+    sctx.fillRect(0, 0, W, H);
+
+    // ring
+    const ringR = Math.min(W, H) * 0.34;
+    const rot = t * ringSpeed;
+    sctx.save();
+    sctx.translate(W / 2, H * 0.5);
+    sctx.rotate(rot);
+    sctx.strokeStyle = ringColor;
+    sctx.lineWidth = 2;
+    sctx.setLineDash(mode === "ready" ? [] : [2, 10]);
+    sctx.beginPath();
+    sctx.arc(0, 0, ringR, 0, Math.PI * 2);
+    sctx.stroke();
+    sctx.restore();
+
+    // icon
+    const ICONS = { idle: "◉", waiting: "⏳", ready: "⚡", early: "✋" };
+    sctx.save();
+    sctx.font = "44px Inter, sans-serif";
+    sctx.textAlign = "center";
+    sctx.textBaseline = "middle";
+    const iconScale = mode === "waiting" ? pulse + 0.18 * Math.sin(t * (ringSpeed / 0.9) * 7) : 1;
+    sctx.translate(W / 2, H * 0.34);
+    sctx.scale(iconScale, iconScale);
+    sctx.fillStyle = accent;
+    sctx.fillText(ICONS[mode] || "◉", 0, 0);
+    sctx.restore();
+
+    // title
+    const titlePx = mode === "ready" ? Math.min(60, W / 6) : Math.min(46, W / 7);
+    sctx.font = "800 " + titlePx + "px Unbounded, Inter, sans-serif";
+    sctx.textAlign = "center";
+    sctx.textBaseline = "middle";
+    if (mode === "ready") {
+      const s = 1 + 0.06 * Math.sin(t * 14);
+      sctx.save(); sctx.translate(W / 2, H * 0.5); sctx.scale(s, s);
+    } else {
+      sctx.save(); sctx.translate(W / 2, H * 0.5);
+    }
+    sctx.shadowColor = mode === "ready" ? "rgba(55,224,140,0.8)" : accent;
+    sctx.shadowBlur = mode === "ready" ? 34 : 0;
+    sctx.fillStyle = mode === "ready" ? "#d6ffe9" : "#f4f4f8";
+    sctx.fillText(stagePhase.title || (roundGames.length ? "game on" : "tap to arm"), 0, 0);
+    sctx.restore();
+
+    // sub
+    sctx.font = "500 15px Inter, sans-serif";
+    sctx.shadowBlur = 0;
+    sctx.fillStyle = "rgba(255,255,255,0.75)";
+    sctx.fillText(stagePhase.sub || (roundGames.length ? "average of 5 games is your score" : "then wait for green"), 0, Math.min(H * 0.42, 40) + titlePx * 0.35);
+  }
+
+  // ---- input ----
+  function trustedInput(fn) {
+    return function (e) {
+      if (e && e.isTrusted === false) return;
+      if (nameGate && !nameGate.classList.contains("hidden")) return;
+      fn(e);
+    };
+  }
+  stage.addEventListener("pointerdown", trustedInput(() => {
+    if (mode === "idle" || mode === "waiting" || mode === "ready") stageAction();
+  }));
+  stage.addEventListener("click", trustedInput(() => { if (mode === "idle") stageAction(); }));
+  document.addEventListener("keydown", trustedInput((e) => {
+    if (e.key !== " " && e.key !== "Enter") return;
+    if (e.repeat) return;
+    const tag = document.activeElement && document.activeElement.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "BUTTON" || tag === "A") return;
+    e.preventDefault();
+    stageAction();
+  }));
   resultShare.addEventListener("click", (e) => e.stopPropagation());
+
+  // ---- stage-effects ----
+  if (stageCanvas) { sctx = stageCanvas.getContext("2d"); requestAnimationFrame(draw); }
+  new MutationObserver(() => {
+    const visible = !resultShare.classList.contains("hidden");
+    if (resultActions) resultActions.classList.toggle("hidden", !visible);
+  }).observe(resultShare, { attributes: true, attributeFilter: ["class"] });
+
+  // ---- tilt + aura + press physics ----
+  if (window.matchMedia("(pointer: fine)").matches) {
+    stage.classList.add("tilting");
+    const stageX = document.getElementById("stage");
+    stageX.addEventListener("pointermove", (e) => {
+      const r = stageX.getBoundingClientRect();
+      const x = (e.clientX - r.left) / r.width - 0.5, y = (e.clientY - r.top) / r.height - 0.5;
+      stageX.style.transform = "perspective(900px) rotateY(" + (x * 5) + "deg) rotateX(" + (-y * 5) + "deg)";
+      if (cursorAura) { cursorAura.style.left = ((x + 0.5) * 100) + "%"; cursorAura.style.top = ((y + 0.5) * 100) + "%"; }
+    });
+    stageX.addEventListener("pointerleave", () => { stageX.style.transform = ""; });
+  }
+  stage.addEventListener("pointerdown", () => stage.classList.add("pressing"));
+  addEventListener("pointerup", () => stage.classList.remove("pressing"));
 
   // ---- leaderboard overlay ----
   function setBoardMode(mode) {
@@ -675,22 +885,19 @@
 
   // live refresh while board open
   setInterval(() => { if (!boardOverlay.classList.contains("hidden")) renderBoard(); }, 15000);
-  // realtime if supabase (created on entering shared mode; recreated after a reconnect)
-  let liveChannel = null;
   function subscribeLive() {
     if (!supabase || liveChannel) return;
     try {
       liveChannel = supabase.channel("scores-live").on("postgres_changes", { event: "INSERT", schema: "public", table: "scores" }, (payload) => {
         const r = payload.new;
-        if (r && r.name !== playerName) pushLive("<b>" + escapeHtml(r.name) + "</b> hit <span class='ms'>" + r.ms + "ms</span>", true);
+        if (r && r.name !== playerName) pushLive("<b>" + escapeHtml(r.name) + "</b> averaged <span class='ms'>" + r.ms + "ms</span> across 5 games", true);
         if (!boardOverlay.classList.contains("hidden")) renderBoard();
       }).subscribe();
     } catch (_) {}
   }
   if (supabase && !localMode) subscribeLive();
 
-  // ---- STATE OF ART: audio, tilt, analytics, podium, share card, themes ----
-  const soundToggle = document.getElementById("sound-toggle");
+  // ---- STATE OF ART: controls, themes, analytics, podium, share ----
   const themeToggle = document.getElementById("theme-toggle");
   const resultActions = document.getElementById("result-actions");
   const shareCardBtn = document.getElementById("share-card-btn");
@@ -707,52 +914,8 @@
   const shareTitle = document.getElementById("share-title");
   const shareDownload = document.getElementById("share-download");
   const shareNative = document.getElementById("share-native");
-  const cursorAura = document.getElementById("cursor-aura");
   let lastEntries = [];
 
-  // audio: tiny synth, no assets
-  let audioOn = localStorage.getItem("rsr_sound") !== "off";
-  let actx = null;
-  function tone(freq, dur, type, gain, when) {
-    if (!audioOn) return;
-    try {
-      actx = actx || new (window.AudioContext || window.webkitAudioContext)();
-      const t = actx.currentTime + (when || 0);
-      const o = actx.createOscillator(), g = actx.createGain();
-      o.type = type || "sine"; o.frequency.setValueAtTime(freq, t);
-      g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(gain || 0.12, t + 0.015);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-      o.connect(g).connect(actx.destination); o.start(t); o.stop(t + dur + 0.05);
-    } catch (_) {}
-  }
-  function paintSound() { if (soundToggle) { soundToggle.textContent = audioOn ? "🔊" : "🔇"; soundToggle.classList.toggle("off", !audioOn); } }
-  if (soundToggle) soundToggle.addEventListener("click", (e) => { e.stopPropagation(); audioOn = !audioOn; localStorage.setItem("rsr_sound", audioOn ? "on" : "off"); paintSound(); if (audioOn) tone(660, 0.12, "sine", 0.1); });
-  paintSound();
-  // react to stage changes for sound + haptics depth
-  new MutationObserver(() => {
-    const c = stage.className;
-    if (c.includes("stage--go")) { tone(880, 0.18, "square", 0.06); tone(1320, 0.22, "sine", 0.08, 0.02); }
-    else if (c.includes("stage--best")) { [523, 659, 784, 1046].forEach((f, i) => tone(f, 0.22, "triangle", 0.1, i * 0.07)); }
-    else if (c.includes("stage--early")) { tone(160, 0.25, "sawtooth", 0.1); }
-    else if (c.includes("stage--wait")) { tone(220, 0.1, "sine", 0.05); }
-  }).observe(stage, { attributes: true, attributeFilter: ["class"] });
-
-  // tilt + aura + press physics
-  if (window.matchMedia("(pointer: fine)").matches) {
-    stage.classList.add("tilting");
-    stage.addEventListener("pointermove", (e) => {
-      const r = stage.getBoundingClientRect();
-      const x = (e.clientX - r.left) / r.width - 0.5, y = (e.clientY - r.top) / r.height - 0.5;
-      stage.style.transform = "perspective(900px) rotateY(" + (x * 5) + "deg) rotateX(" + (-y * 5) + "deg)";
-      if (cursorAura) { cursorAura.style.left = ((x + 0.5) * 100) + "%"; cursorAura.style.top = ((y + 0.5) * 100) + "%"; }
-    });
-    stage.addEventListener("pointerleave", () => { stage.style.transform = ""; });
-    stage.addEventListener("pointerdown", () => stage.classList.add("pressing"));
-    addEventListener("pointerup", () => stage.classList.remove("pressing"));
-  }
-
-  // themes: midnight -> sunset -> ice
   const THEMES = ["", "sunset", "ice"];
   let themeIdx = THEMES.indexOf(localStorage.getItem("rsr_theme") || "");
   if (themeIdx < 0) themeIdx = 0;
@@ -760,7 +923,7 @@
   if (themeToggle) themeToggle.addEventListener("click", (e) => { e.stopPropagation(); themeIdx = (themeIdx + 1) % THEMES.length; localStorage.setItem("rsr_theme", THEMES[themeIdx]); paintTheme(); tone(520 + themeIdx * 120, 0.12, "sine", 0.08); });
   paintTheme();
 
-  // analytics sparkline
+  // analytics sparkline (round averages)
   function toggleAnalytics(force) {
     const show = force !== undefined ? force : analytics.classList.contains("hidden");
     analytics.classList.toggle("hidden", !show);
@@ -777,14 +940,12 @@
     const W = sparkline.width, H = sparkline.height;
     ctx.clearRect(0, 0, W, H);
     const h = game.history.map((x) => x.ms).slice(-20);
-    if (!h.length) { ctx.fillStyle = "#7c7c92"; ctx.font = "22px Inter"; ctx.fillText("play a round — your form shows here", 24, H / 2); return; }
+    if (!h.length) { ctx.fillStyle = "#7c7c92"; ctx.font = "22px Inter"; ctx.fillText("complete a round — your form shows here", 24, H / 2); return; }
     const min = Math.min(...h, sessionBest || 9999) * 0.9, max = Math.max(...h) * 1.1;
     const px = (i) => 16 + (i / Math.max(1, h.length - 1)) * (W - 32);
     const py = (v) => H - 14 - ((v - min) / Math.max(1, max - min)) * (H - 30);
-    // grid
     ctx.strokeStyle = "rgba(255,255,255,0.07)"; ctx.lineWidth = 1;
     for (let g = 0; g < 3; g++) { const y = 14 + g * (H - 28) / 2; ctx.beginPath(); ctx.moveTo(10, y); ctx.lineTo(W - 10, y); ctx.stroke(); }
-    // area
     const grad = ctx.createLinearGradient(0, 0, 0, H);
     grad.addColorStop(0, "rgba(55,224,140,0.4)"); grad.addColorStop(1, "rgba(55,224,140,0)");
     ctx.beginPath(); h.forEach((v, i) => i ? ctx.lineTo(px(i), py(v)) : ctx.moveTo(px(i), py(v)));
@@ -801,11 +962,10 @@
   }
   setInterval(() => { if (analytics && !analytics.classList.contains("hidden")) drawSpark(); }, 3000);
 
-  // podium augmentation (wrap renderBoard)
+  // podium augmentation
   const _renderBoard = renderBoard;
   renderBoard = async function () {
     await _renderBoard();
-    // podium top 3
     try {
       if (podium) {
         podium.innerHTML = "";
@@ -816,26 +976,20 @@
             const d = document.createElement("div");
             d.className = "podium-col " + cls[k];
             d.innerHTML = '<div class="podium-crown">' + (cls[k] === "p1" ? "👑" : cls[k] === "p2" ? "🥈" : "🥉") + '</div>' +
-              '<div class="podium-name"></div><div class="podium-ms">' + e.ms + 'ms</div><div class="podium-bar"><i style="width:' + Math.max(18, 100 - (e.ms - lastEntries[0].ms) / 3) + '%"></i></div>';
+              '<div class="podium-name"></div><div class="podium-ms">' + e.ms + 'ms avg</div><div class="podium-bar"><i style="width:' + Math.max(18, 100 - (e.ms - lastEntries[0].ms) / 3) + '%"></i></div>';
             d.querySelector(".podium-name").textContent = e.name;
             podium.appendChild(d);
           });
         }
       }
-      } catch (_) {}
+    } catch (_) {}
   };
 
-  // result actions + share card
-  const _obs = new MutationObserver(() => {
-    const visible = !resultShare.classList.contains("hidden");
-    if (resultActions) resultActions.classList.toggle("hidden", !visible);
-  });
-  if (resultShare && resultActions) _obs.observe(resultShare, { attributes: true, attributeFilter: ["class"] });
   if (rematchBtn) rematchBtn.addEventListener("click", (e) => { e.stopPropagation(); tone(700, 0.1, "sine", 0.08); stageAction(); });
   function drawShareCard() {
     const c = shareCanvas, ctx = c.getContext("2d");
-    const ms = lastMs || sessionBest || 248;
-    const t = (ms < 200 ? "GODLIKE" : ms < 250 ? "ELITE" : ms < 350 ? "SOLID" : "WARMING UP");
+    const avg = lastHitAvg || sessionBest || 248;
+    const t = (avg < 200 ? "GODLIKE" : avg < 250 ? "ELITE" : avg < 350 ? "SOLID" : "WARMING UP");
     const g = ctx.createLinearGradient(0, 0, 900, 1120);
     g.addColorStop(0, "#171736"); g.addColorStop(0.55, "#0b0b14"); g.addColorStop(1, "#2a1030");
     ctx.fillStyle = g; ctx.fillRect(0, 0, 900, 1120);
@@ -845,13 +999,12 @@
     ctx.fillStyle = "#ffd75c"; ctx.font = "700 26px Inter"; ctx.fillText("● LIVE CERTIFIED", 620, 90);
     ctx.fillStyle = "#fff"; ctx.font = "800 150px Unbounded, Inter, sans-serif";
     ctx.shadowColor = "#37e08c"; ctx.shadowBlur = 60;
-    ctx.fillText(ms + "ms", 60, 330); ctx.shadowBlur = 0;
+    ctx.fillText(avg + "ms", 60, 330); ctx.shadowBlur = 0;
     ctx.fillStyle = "#37e08c"; ctx.font = "800 44px Inter";
-    ctx.fillText("⚡ " + t, 60, 400);
+    ctx.fillText("⚡ " + t + " — 5-GAME AVERAGE", 60, 400);
     ctx.fillStyle = "#fff"; ctx.font = "700 52px Inter"; ctx.fillText(playerName || "you", 60, 500);
     ctx.fillStyle = "rgba(255,255,255,0.65)"; ctx.font = "500 30px Inter";
-    ctx.fillText("best " + (sessionBest || ms) + "ms · lvl " + levelFor(game.xp) + " · streak " + game.streak + "🔥", 60, 552);
-    // sparkline mini
+    ctx.fillText("best avg " + (sessionBest || avg) + "ms · lvl " + levelFor(game.xp) + " · streak " + game.streak + "🔥", 60, 552);
     const h = game.history.map((x) => x.ms).slice(-14);
     if (h.length > 1) {
       ctx.strokeStyle = "#37e08c"; ctx.lineWidth = 6; ctx.beginPath();
@@ -865,7 +1018,7 @@
   }
   if (shareCardBtn) shareCardBtn.addEventListener("click", (e) => {
     e.stopPropagation(); drawShareCard();
-    if (shareTitle) shareTitle.textContent = (lastMs || sessionBest || "—") + "ms ⚡";
+    if (shareTitle) shareTitle.textContent = (lastHitAvg || sessionBest || "—") + "ms ⚡";
     if (shareModal) shareModal.classList.remove("hidden");
     tone(760, 0.12, "triangle", 0.09);
   });
@@ -873,7 +1026,7 @@
   if (shareModal) shareModal.addEventListener("click", (e) => { if (e.target === shareModal) shareModal.classList.add("hidden"); });
   if (shareDownload) shareDownload.addEventListener("click", () => {
     const a = document.createElement("a");
-    a.download = "reaction-" + (lastMs || "best") + "ms.png";
+    a.download = "reaction-" + (lastHitAvg || "best") + "ms.png";
     a.href = shareCanvas.toDataURL("image/png");
     a.click();
     toast("Card saved — flex it 🖼", "🖼", "");
@@ -883,9 +1036,9 @@
       const blob = await new Promise((res) => shareCanvas.toBlob(res, "image/png"));
       const file = new File([blob], "reaction.png", { type: "image/png" });
       if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({ files: [file], title: "My reaction: " + lastMs + "ms" });
+        await navigator.share({ files: [file], title: "My avg: " + lastHitAvg + "ms" });
       } else {
-        await navigator.clipboard.writeText("I scored " + lastMs + "ms on Reaction Speed Roulette " + DEPLOYED_URL);
+        await navigator.clipboard.writeText("I averaged " + lastHitAvg + "ms on Reaction Speed Roulette " + DEPLOYED_URL);
         toast("Link copied to clipboard 🔗", "🔗", "");
       }
     } catch (_) {}
@@ -894,7 +1047,7 @@
   // coach: first-run hint sequence
   if (!localStorage.getItem("rsr_coached")) {
     setTimeout(() => { if (!playerName) return; toast("Tap the big panel to arm…", "◉", ""); }, 1200);
-    setTimeout(() => { if (rounds === 0 && playerName) toast("Wait for GREEN, then smash it ⚡", "⏳", ""); }, 4500);
+    setTimeout(() => { if (roundsDone === 0 && playerName) toast("Play 5 games — your average is your score ⚡", "⏳", ""); }, 4500);
     localStorage.setItem("rsr_coached", "1");
   }
 

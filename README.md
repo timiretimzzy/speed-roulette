@@ -1,6 +1,8 @@
 # Reaction Speed Roulette
 
 A one-tap reaction speed game with a leaderboard shared by everyone who plays.
+Each round is **5 games** — your leaderboard score is the **average** of those
+5 games, not a single lucky hit.
 
 ## Play
 
@@ -29,6 +31,7 @@ in the browser instead of the shared one, so it's still fully playable.
      id uuid primary key default gen_random_uuid(),
      name text not null,
      ms integer not null,
+     games integer[],
      source text not null default 'app',
      created_at timestamptz default now()
    );
@@ -48,10 +51,12 @@ in the browser instead of the shared one, so it's still fully playable.
    row with `source = 'app'` (so entries that came through the real game can
    be distinguished from anything else).
 
-   `ms` is not range-restricted — a player can legitimately land very fast
-   times (or even single-digit ones) by timing the green transition, and
-   that's their reward for practicing. (It must still be a positive integer;
-   the function rejects `ms <= 0`.)
+   The game plays **5 games per round** and the function records `ms` (the
+   rounded average) plus the per-game times in `games`, so the leaderboard is
+   "fastest average" rather than a single lucky hit. A player can legitimately
+   land very fast single games by timing the green transition, and that's their
+   reward for practicing — `ms` still has to be a positive integer, and the
+   function rejects anything else.
 
    The game also needs a `players` table that reserves each racer name to the
    first device that claims it (matched case-insensitively via `name_lower`):
@@ -89,8 +94,8 @@ in the browser instead of the shared one, so it's still fully playable.
    alter publication supabase_realtime add table public.scores, public.players;
    ```
 
-3. Deploy the `submit-score` Edge Function (the only writer of scores; it uses
-   the service-role key and records `source = 'app'`):
+3. Deploy the `submit-score` Edge Function (the only writer of scores; it
+   accepts a round of 5 games, averages them, and records `source = 'app'`):
 
    ```bash
    npx supabase functions deploy submit-score --project-ref <your-ref> --use-api
@@ -102,9 +107,9 @@ in the browser instead of the shared one, so it's still fully playable.
    function reads it at runtime and uses it only on the server — never sent to
    the browser.
 
-5. In the project, go to **Settings → API**. Copy the **Project URL** and the
+4. In the project, go to **Settings → API**. Copy the **Project URL** and the
     **publishable** public key.
-6. Open `config.js` in this project and paste them in:
+5. Open `config.js` in this project and paste them in:
 
    ```js
    window.RSR_CONFIG = {
@@ -113,7 +118,7 @@ in the browser instead of the shared one, so it's still fully playable.
    };
    ```
 
-7. Commit and push. That's it — every visitor reads the same `scores` table,
+6. Commit and push. That's it — every visitor reads the same `scores` table,
     and every row carries `source = 'app'` from the function.
 
 ## Key rotation / security notes
@@ -138,5 +143,5 @@ in the browser instead of the shared one, so it's still fully playable.
 - `style.css` — fullscreen layout and theme
 - `script.js` — game logic + leaderboard (Supabase, with local fallback)
 - `config.js` — your Supabase project URL and publishable key
-- `supabase/functions/submit-score/` — Edge Function (the only writer of scores) that inserts `source = 'app'` rows
+- `supabase/functions/submit-score/` — Edge Function (the only writer of scores) that validates a 5-game round, averages it, and inserts `source = 'app'` rows
 - `supabase/config.toml` — Supabase CLI project + function config

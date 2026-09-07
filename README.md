@@ -35,18 +35,21 @@ in the browser instead of the shared one, so it's still fully playable.
 
    alter table scores enable row level security;
 
-   create policy "Anyone can submit a score"
-     on scores for insert
-     with check (true);
-
    create policy "Anyone can read scores"
      on scores for select
      using (true);
    ```
 
-   `ms` is bounded to 100–5000ms so clearly non-human submissions can't top
-   the leaderboard. If you already created the `scores` table before this
-   check existed, add it with:
+   The public key is **SELECT-only** on `scores`: there is deliberately no
+   INSERT policy, so nobody can inject fake leaderboard rows — not even with
+   the browser key, which has to be exposed in your site's JS for a static
+   site. All score writes go through the `submit-score` Edge Function, which
+   uses the service-role key server-side.
+
+   `ms` is bounded to 100–5000ms both here and in the function, so clearly
+   non-human submissions (negative times, 2ms, 100,000ms …) are rejected. If
+   you already created the `scores` table before this check existed, add it
+   with:
 
    ```sql
    alter table scores add constraint scores_ms_human check (ms >= 100 and ms <= 5000);
@@ -78,23 +81,79 @@ in the browser instead of the shared one, so it's still fully playable.
      with check (true);
    ```
 
-   This intentionally only allows INSERT and SELECT for the public key — no
-   one can edit or delete another player's score, even with the key exposed
-   in your site's JS (which it has to be, for a static site like this).
+   Name claiming is a first-come-first-served string, not a security boundary —
+   scores are, and they're write-protected as shown above.
 
-3. In the project, go to **Settings → API**. Copy the **Project URL** and the
-   **anon public** key.
-4. Open `config.js` in this project and paste them in:
+3. Create the rate-limiting function so the shared leaderboard can't be
+   flooded from one name in a short window:
+
+   ```sql
+   create table rate_limits (
+     name text primary key,
+     window_start timestamptz not null default now(),
+     count int not null default 0
+   );
+
+   alter table rate_limits enable row level security;
+
+   create or replace function rate_limit_allow(
+     p_name text, p_max int, p_window_seconds int
+   ) returns boolean language plpgsql security definer set search_path = ''
+   as $FUNC$
+   declare v_reset boolean; v_count int;
+   begin
+     insert into rate_limits (name, window_start, count)
+     values (p_name, now(), 0) on conflict (name) do nothing;
+     select (r.window_start < now() - make_interval(secs => p_window_seconds)), r.count
+     into v_reset, v_count from rate_limits r where r.name = p_name for update;
+     if v_reset then
+       v_count := 1;
+       update rate_limits set window_start = now(), count = 1 where name = p_name;
+     else
+       v_count := v_count + 1;
+       update rate_limits set count = v_count where name = p_name;
+     end if;
+     return v_count <= p_max;
+   end;
+   $FUNC$;
+   ```
+
+4. Deploy the `submit-score` Edge Function (it writes scores with the
+   service-role key and rate-limits submissions):
+
+   ```bash
+   npx supabase functions deploy submit-score --project-ref <your-ref> --use-api
+   npx supabase secrets set SERVICE_ROLE_KEY=<your-service-secret-key> --project-ref <your-ref>
+   ```
+
+   `SERVICE_ROLE_KEY` is a service-role-scoped secret (Settings → API →
+   **secret** key in modern projects, or the legacy `service_role` JWT). The
+   function reads it at runtime and uses it only on the server — never sent to
+   the browser.
+
+5. In the project, go to **Settings → API**. Copy the **Project URL** and the
+   **publishable** public key.
+6. Open `config.js` in this project and paste them in:
 
    ```js
    window.RSR_CONFIG = {
      SUPABASE_URL: "https://xxxxx.supabase.co",
-     SUPABASE_ANON_KEY: "eyJhbG..."
+     SUPABASE_ANON_KEY: "sb_publishable_..."
    };
    ```
 
-5. Commit and push. That's it — every visitor now reads and writes the same
-   `scores` table.
+7. Commit and push. That's it — every visitor reads the same `scores` table,
+   and wins are validated server-side by the function before they land there.
+
+## Key rotation / security notes
+
+- The **publishable** (browser) key can SELECT `scores` and INSERT/UPDATE
+  `players` (name claiming) only — RLS blocks everything else. It has no
+  INSERT on `scores`.
+- The **service-role secret** is only ever used by the Edge Function. Never
+  put it in `config.js` — that file is public.
+- If a browser-used key is ever leaked you can rotate it in **Settings →
+  API** without touching the function.
 
 ## Deploy to GitHub Pages
 
@@ -107,4 +166,7 @@ in the browser instead of the shared one, so it's still fully playable.
 - `index.html` — structure (name gate, game stage, leaderboard panel)
 - `style.css` — fullscreen layout and theme
 - `script.js` — game logic + leaderboard (Supabase, with local fallback)
-- `config.js` — your Supabase project URL and public key
+- `config.js` — your Supabase project URL and publishable key
+- `supabase/functions/submit-score/` — Edge Function that validates and writes scores
+- `supabase/migrations/rate_limits.sql` — `rate_limits` table + `rate_limit_allow` RPC
+- `supabase/config.toml` — Supabase CLI project + function config

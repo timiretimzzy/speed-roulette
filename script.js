@@ -363,14 +363,27 @@
   async function submitScore(name, ms) {
     if (!Number.isInteger(ms) || ms < 100 || ms > 5000) return true;
     if (supabase && !localMode) {
-      const { error } = await supabase.from("scores").insert({ name, ms });
-      if (error) {
-        console.error("Supabase insert failed:", error.message);
-        enterLocalMode("Supabase insert failed");
+      try {
+        const res = await fetch(cfg.SUPABASE_URL + "/functions/v1/submit-score", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "apikey": cfg.SUPABASE_ANON_KEY, "Authorization": "Bearer " + cfg.SUPABASE_ANON_KEY },
+          body: JSON.stringify({ name, ms }),
+        });
+        if (!res.ok) {
+          console.error("submit-score rejected:", res.status);
+          if (res.status !== 429 && res.status !== 400) {
+            enterLocalMode("submit-score failed: " + res.status);
+            return saveScoreLocal(name, ms);
+          }
+          return false;
+        }
+        resultNote.textContent = "";
+        return true;
+      } catch (e) {
+        console.error("submit-score failed:", e.message);
+        enterLocalMode("submit-score failed: " + e.message);
         return saveScoreLocal(name, ms);
       }
-      resultNote.textContent = "";
-      return true;
     }
     return saveScoreLocal(name, ms);
   }

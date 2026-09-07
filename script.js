@@ -818,7 +818,9 @@
     sctx.font = "500 15px Inter, sans-serif";
     sctx.shadowBlur = 0;
     sctx.fillStyle = "rgba(255,255,255,0.75)";
-    sctx.fillText(stagePhase.sub || (roundGames.length ? "average of 5 games is your score" : "then wait for green"), 0, Math.min(H * 0.42, 40) + titlePx * 0.35);
+    sctx.textAlign = "center";
+    sctx.textBaseline = "middle";
+    sctx.fillText(stagePhase.sub || (roundGames.length ? "average of 5 games is your score" : "then wait for green"), W / 2, Math.min(H * 0.42, 40) + titlePx * 0.35);
   }
 
   // ---- input ----

@@ -29,8 +29,8 @@ in the browser instead of the shared one, so it's still fully playable.
      id uuid primary key default gen_random_uuid(),
      name text not null,
      ms integer not null,
-     created_at timestamptz default now(),
-     constraint scores_ms_human check (ms >= 100 and ms <= 5000)
+     source text not null default 'app',
+     created_at timestamptz default now()
    );
 
    alter table scores enable row level security;
@@ -41,19 +41,16 @@ in the browser instead of the shared one, so it's still fully playable.
    ```
 
    The public key is **SELECT-only** on `scores`: there is deliberately no
-   INSERT policy, so nobody can inject fake leaderboard rows — not even with
-   the browser key, which has to be exposed in your site's JS for a static
-   site. All score writes go through the `submit-score` Edge Function, which
-   uses the service-role key server-side.
+   INSERT policy, so nobody can inject a leaderboard row through the REST
+   API — not even with the browser key, which has to be exposed in your
+   site's JS for a static site. All score writes go through the `submit-score`
+   Edge Function, which uses the service-role key server-side and stamps each
+   row with `source = 'app'` (so entries that came through the real game can
+   be distinguished from anything else).
 
-   `ms` is bounded to 100–5000ms both here and in the function, so clearly
-   non-human submissions (negative times, 2ms, 100,000ms …) are rejected. If
-   you already created the `scores` table before this check existed, add it
-   with:
-
-   ```sql
-   alter table scores add constraint scores_ms_human check (ms >= 100 and ms <= 5000);
-   ```
+   `ms` is not range-restricted — a player can legitimately land very fast
+   times (or even single-digit ones) by timing the green transition, and
+   that's their reward for practicing.
 
    The game also needs a `players` table that reserves each racer name to the
    first device that claims it (matched case-insensitively via `name_lower`):
@@ -84,42 +81,8 @@ in the browser instead of the shared one, so it's still fully playable.
    Name claiming is a first-come-first-served string, not a security boundary —
    scores are, and they're write-protected as shown above.
 
-3. Create the rate-limiting function so the shared leaderboard can't be
-   flooded from one name in a short window:
-
-   ```sql
-   create table rate_limits (
-     name text primary key,
-     window_start timestamptz not null default now(),
-     count int not null default 0
-   );
-
-   alter table rate_limits enable row level security;
-
-   create or replace function rate_limit_allow(
-     p_name text, p_max int, p_window_seconds int
-   ) returns boolean language plpgsql security definer set search_path = ''
-   as $FUNC$
-   declare v_reset boolean; v_count int;
-   begin
-     insert into rate_limits (name, window_start, count)
-     values (p_name, now(), 0) on conflict (name) do nothing;
-     select (r.window_start < now() - make_interval(secs => p_window_seconds)), r.count
-     into v_reset, v_count from rate_limits r where r.name = p_name for update;
-     if v_reset then
-       v_count := 1;
-       update rate_limits set window_start = now(), count = 1 where name = p_name;
-     else
-       v_count := v_count + 1;
-       update rate_limits set count = v_count where name = p_name;
-     end if;
-     return v_count <= p_max;
-   end;
-   $FUNC$;
-   ```
-
-4. Deploy the `submit-score` Edge Function (it writes scores with the
-   service-role key and rate-limits submissions):
+3. Deploy the `submit-score` Edge Function (the only writer of scores; it uses
+   the service-role key and records `source = 'app'`):
 
    ```bash
    npx supabase functions deploy submit-score --project-ref <your-ref> --use-api
@@ -132,7 +95,7 @@ in the browser instead of the shared one, so it's still fully playable.
    the browser.
 
 5. In the project, go to **Settings → API**. Copy the **Project URL** and the
-   **publishable** public key.
+    **publishable** public key.
 6. Open `config.js` in this project and paste them in:
 
    ```js
@@ -143,7 +106,7 @@ in the browser instead of the shared one, so it's still fully playable.
    ```
 
 7. Commit and push. That's it — every visitor reads the same `scores` table,
-   and wins are validated server-side by the function before they land there.
+    and every row carries `source = 'app'` from the function.
 
 ## Key rotation / security notes
 
@@ -167,6 +130,5 @@ in the browser instead of the shared one, so it's still fully playable.
 - `style.css` — fullscreen layout and theme
 - `script.js` — game logic + leaderboard (Supabase, with local fallback)
 - `config.js` — your Supabase project URL and publishable key
-- `supabase/functions/submit-score/` — Edge Function that validates and writes scores
-- `supabase/migrations/rate_limits.sql` — `rate_limits` table + `rate_limit_allow` RPC
+- `supabase/functions/submit-score/` — Edge Function (the only writer of scores) that inserts `source = 'app'` rows
 - `supabase/config.toml` — Supabase CLI project + function config

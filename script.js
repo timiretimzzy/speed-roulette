@@ -361,7 +361,7 @@
     return true;
   }
   async function submitScore(name, ms) {
-    if (!Number.isInteger(ms) || ms < 100 || ms > 5000) return true;
+    if (!Number.isInteger(ms)) return true;
     if (supabase && !localMode) {
       try {
         const res = await fetch(cfg.SUPABASE_URL + "/functions/v1/submit-score", {

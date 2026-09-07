@@ -50,7 +50,8 @@ in the browser instead of the shared one, so it's still fully playable.
 
    `ms` is not range-restricted — a player can legitimately land very fast
    times (or even single-digit ones) by timing the green transition, and
-   that's their reward for practicing.
+   that's their reward for practicing. (It must still be a positive integer;
+   the function rejects `ms <= 0`.)
 
    The game also needs a `players` table that reserves each racer name to the
    first device that claims it (matched case-insensitively via `name_lower`):
@@ -59,7 +60,7 @@ in the browser instead of the shared one, so it's still fully playable.
    create table players (
      name_lower text primary key,
      name text not null,
-     device_id text
+     device_id uuid
    );
 
    alter table players enable row level security;
@@ -80,6 +81,13 @@ in the browser instead of the shared one, so it's still fully playable.
 
    Name claiming is a first-come-first-served string, not a security boundary —
    scores are, and they're write-protected as shown above.
+
+   The live feed (`postgres_changes` on `scores`) needs that table in the
+   realtime publication. In the dashboard it's **Database → Replication**, or:
+
+   ```sql
+   alter publication supabase_realtime add table public.scores, public.players;
+   ```
 
 3. Deploy the `submit-score` Edge Function (the only writer of scores; it uses
    the service-role key and records `source = 'app'`):

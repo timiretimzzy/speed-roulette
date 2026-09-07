@@ -56,9 +56,9 @@ Deno.serve(async (req) => {
     return json({ error: "name contains invalid characters" }, 400);
   }
 
-  // ---- validate ms (must be a number) ----
-  if (typeof msRaw !== "number" || !Number.isInteger(msRaw)) {
-    return json({ error: "ms must be an integer" }, 400);
+  // ---- validate ms (positive integer) ----
+  if (typeof msRaw !== "number" || !Number.isInteger(msRaw) || msRaw <= 0) {
+    return json({ error: "ms must be a positive integer" }, 400);
   }
 
   // ---- insert score with the service-role key ----

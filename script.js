@@ -757,7 +757,7 @@
     let bgTop, bgBottom, glowColor, accent, ringColor, ringSpeed, titleFont, titleColor, pulse;
     if (mode === "waiting") { bgTop = "#5a1818"; bgBottom = "#2a0d0d"; glowColor = "rgba(255,92,92,0.45)"; accent = "#ff5c5c"; ringColor = "rgba(255,92,92,0.6)"; ringSpeed = 1.1; pulse = 0.9; }
     else if (mode === "ready") { bgTop = "#0f7a48"; bgBottom = "#08351f"; glowColor = "rgba(55,224,140,0.6)"; accent = "#37e08c"; ringColor = "rgba(55,224,140,0.85)"; ringSpeed = 0; pulse = 1.4; }
-    else if (mode === "early") { bgTop = "#5c3d10"; bgBottom = "#2a1d08"; glowColor = "rgba(255,180,68,0.3)"; accent = "#ffb444"; ringColor = "rgba(255,180,68,0.4)"; ringSpeed = 0.8; pulse = 1; }
+    else if (mode === "early") { bgTop = "#8a5210"; bgBottom = "#3d2208"; glowColor = "rgba(255,180,68,0.55)"; accent = "#ffb444"; ringColor = "rgba(255,180,68,0.7)"; ringSpeed = 0.8; pulse = 1; }
     else { bgTop = "#22263e"; bgBottom = "#12121e"; glowColor = "rgba(139,132,255,0.3)"; accent = cs.getPropertyValue("--accent") || "#8b84ff"; ringColor = "rgba(255,255,255,0.18)"; ringSpeed = 0.15; pulse = 1; }
 
     const g = sctx.createLinearGradient(0, 0, 0, H);

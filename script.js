@@ -75,6 +75,7 @@
   let localMode = false;
   let frameCount = 0;
   let stagePhase = { title: "", sub: "" };
+  let resultShow = null;
   let lastHitAvg = null;
 
   // ---- gamification state (localStorage) ----
@@ -603,6 +604,7 @@
   function startGo() {
     mode = "ready";
     readyAt = performance.now();
+    setPhase("GO!", "tap now!");
     soundGo();
     vibrate(10);
   }
@@ -613,6 +615,7 @@
     const fresh = roundGames.length === 0;
     resultShare.classList.add("hidden");
     resultNote.textContent = "";
+    resultShow = null;
     mode = "waiting";
     setPhase("wait for it...", "don't tap yet");
     goAt = performance.now() + (900 + Math.random() * 2400);
@@ -702,13 +705,12 @@
     if (isBest) {
       vibrate([40, 60, 40]);
       soundBest();
-      setPhase(avg + "ms — new best avg!", "5 games averaged · tap to play again");
       fireConfetti(120);
       toast("New best average: " + avg + "ms! 👑", "👑", "toast--best");
     } else {
       vibrate(25);
-      setPhase(avg + "ms average", "across 5 games · tap to play again");
     }
+    resultShow = { label: isBest ? "NEW BEST" : "ROUND AVERAGE", from: lastRoundAvg || 0, target: avg, start: performance.now(), dur: 550, isBest };
 
     resultShare.href = tweetHref(shareText(avg, isBest));
     resultShare.classList.remove("hidden");
@@ -798,12 +800,37 @@
     sctx.restore();
 
     // title
-    const titlePx = mode === "ready" ? Math.min(60, W / 6) : Math.min(46, W / 7);
+    const titlePx = mode === "ready" ? Math.min(42, W / 6) : Math.min(30, W / 7);
+    sctx.font = "800 " + titlePx + "px Unbounded, Inter, sans-serif";
+    sctx.textAlign = "center";
+    sctx.textBaseline = "middle";
+
+    if (resultShow) {
+      const k = Math.min(1, (performance.now() - resultShow.start) / resultShow.dur);
+      const e = 1 - Math.pow(1 - k, 3);
+      const val = Math.round(resultShow.from + (resultShow.target - resultShow.from) * e);
+      sctx.font = "700 12px Inter, sans-serif";
+      sctx.shadowBlur = 0;
+      sctx.fillStyle = resultShow.isBest ? "rgba(255,215,92,0.85)" : "rgba(255,255,255,0.6)";
+      sctx.fillText(resultShow.label, W / 2, H * 0.38);
+      const numPx = Math.min(58, W / 5, H * 0.24);
+      sctx.font = "800 " + numPx + "px Unbounded, Inter, sans-serif";
+      sctx.shadowColor = resultShow.isBest ? "rgba(255,215,92,0.55)" : "rgba(55,224,140,0.55)";
+      sctx.shadowBlur = 30;
+      sctx.fillStyle = resultShow.isBest ? "#ffd75c" : "#37e08c";
+      sctx.fillText(val + "ms", W / 2, H * 0.54);
+      sctx.shadowBlur = 0;
+      sctx.font = "500 13px Inter, sans-serif";
+      sctx.fillStyle = "rgba(255,255,255,0.7)";
+      sctx.fillText("average of 5 games · tap to play again", W / 2, H * 0.67);
+      return;
+    }
+
     sctx.font = "800 " + titlePx + "px Unbounded, Inter, sans-serif";
     sctx.textAlign = "center";
     sctx.textBaseline = "middle";
     if (mode === "ready") {
-      const s = 1 + 0.06 * Math.sin(t * 14);
+      const s = 1 + 0.03 * Math.sin(t * 14);
       sctx.save(); sctx.translate(W / 2, H * 0.5); sctx.scale(s, s);
     } else {
       sctx.save(); sctx.translate(W / 2, H * 0.5);
@@ -815,7 +842,7 @@
     sctx.restore();
 
     // sub
-    sctx.font = "500 15px Inter, sans-serif";
+    sctx.font = "500 13px Inter, sans-serif";
     sctx.shadowBlur = 0;
     sctx.fillStyle = "rgba(255,255,255,0.75)";
     sctx.textAlign = "center";
@@ -828,6 +855,7 @@
     return function (e) {
       if (e && e.isTrusted === false) return;
       if (nameGate && !nameGate.classList.contains("hidden")) return;
+      if (menuOverlay && !menuOverlay.classList.contains("hidden")) return;
       fn(e);
     };
   }
@@ -885,6 +913,29 @@
   boardClose.addEventListener("click", () => boardOverlay.classList.add("hidden"));
   boardOverlay.addEventListener("click", (e) => { if (e.target === boardOverlay) boardOverlay.classList.add("hidden"); });
 
+  // ---- menu (hamburger sheet) ----
+  const menuOverlay = document.getElementById("menu");
+  const menuToggle = document.getElementById("menu-toggle");
+  const menuClose = document.getElementById("menu-close");
+  function setMenu(open) {
+    if (!menuOverlay) return;
+    menuOverlay.classList.toggle("hidden", !open);
+    if (menuToggle) {
+      menuToggle.setAttribute("aria-expanded", open ? "true" : "false");
+      menuToggle.classList.toggle("is-active", open);
+    }
+    if (open) { drawSpark(); } else { stage.focus(); }
+  }
+  if (menuToggle) menuToggle.addEventListener("click", (e) => {
+    e.stopPropagation();
+    setMenu(!!menuOverlay.classList.contains("hidden"));
+  });
+  if (menuClose) menuClose.addEventListener("click", () => setMenu(false));
+  if (menuOverlay) menuOverlay.addEventListener("click", (e) => { if (e.target === menuOverlay) setMenu(false); });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && menuOverlay && !menuOverlay.classList.contains("hidden")) setMenu(false);
+  });
+
   // live refresh while board open
   setInterval(() => { if (!boardOverlay.classList.contains("hidden")) renderBoard(); }, 15000);
   function subscribeLive() {
@@ -904,9 +955,7 @@
   const resultActions = document.getElementById("result-actions");
   const shareCardBtn = document.getElementById("share-card-btn");
   const rematchBtn = document.getElementById("rematch-btn");
-  const analytics = document.getElementById("analytics");
   const analyticsAvg = document.getElementById("analytics-avg");
-  const analyticsClose = document.getElementById("analytics-close");
   const sparkline = document.getElementById("sparkline");
   const analyticsMeta = document.getElementById("analytics-meta");
   const podium = document.getElementById("podium");
@@ -926,16 +975,6 @@
   paintTheme();
 
   // analytics sparkline (round averages)
-  function toggleAnalytics(force) {
-    const show = force !== undefined ? force : analytics.classList.contains("hidden");
-    analytics.classList.toggle("hidden", !show);
-    if (show) drawSpark();
-  }
-  ["stat-last-btn", "stat-best-btn", "stat-rounds-btn"].forEach((id) => {
-    const b = document.getElementById(id);
-    if (b) b.addEventListener("click", (e) => { e.stopPropagation(); tone(500, 0.08, "sine", 0.06); toggleAnalytics(); });
-  });
-  if (analyticsClose) analyticsClose.addEventListener("click", (e) => { e.stopPropagation(); toggleAnalytics(false); });
   function drawSpark() {
     if (!sparkline) return;
     const ctx = sparkline.getContext("2d");
@@ -962,7 +1001,7 @@
     if (analyticsAvg) analyticsAvg.textContent = "avg " + avg + "ms";
     if (analyticsMeta) analyticsMeta.textContent = "median " + med + "ms · consistency " + consistency + "% · n=" + h.length;
   }
-  setInterval(() => { if (analytics && !analytics.classList.contains("hidden")) drawSpark(); }, 3000);
+  setInterval(() => { if (menuOverlay && !menuOverlay.classList.contains("hidden")) drawSpark(); }, 3000);
 
   // podium augmentation
   const _renderBoard = renderBoard;

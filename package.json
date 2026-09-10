@@ -1,0 +1,23 @@
+{
+  "name": "zivvvo",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build:content": "node tools/zivvvo/build-content-pack.mjs",
+    "copy:images": "node tools/zivvvo/copy-images.mjs",
+    "make:icons": "node tools/zivvvo/make-icons.mjs",
+    "build:precache": "node tools/zivvvo/build-precache.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "dev:web": "npm run dev -w @zivvvo/web",
+    "build:web": "node tools/zivvvo/copy-images.mjs && npm run build -w @zivvvo/web && node tools/zivvvo/build-precache.mjs"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.9"
+  }
+}

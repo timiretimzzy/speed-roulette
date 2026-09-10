@@ -1,2 +1,24 @@
-# Supabase CLI local/link artifacts
+# secrets — never commit
+data/primaed/.creds.txt
+# raw scrape / build-time source — keep out of the public repo
+/data/
+/research/
+.env
+.env.*
+!.env.example
 supabase/.temp/
+
+# node / build
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+*.tgz
+
+# os / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.suo
+*.swp

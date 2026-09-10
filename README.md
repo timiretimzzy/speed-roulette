@@ -1,105 +1,147 @@
-# Zivvvo
+# Reaction Speed Roulette
 
-> Learning platform for examinations. Feel ready before you sit the test.
+A one-tap reaction speed game with a leaderboard shared by everyone who plays.
+Each round is **5 games** — your leaderboard score is the **average** of those
+5 games, not a single lucky hit.
 
-**Zivvvo** is a mobile-first, offline-capable, adaptive examination preparation
-platform. It does not just present questions — it diagnoses a learner's
-ability, reveals their weaknesses, recommends the next best thing to study,
-repairs knowledge gaps, simulates the real examination, and tells the learner
-how ready they are.
+## Play
 
-The first examination category is the **Zimbabwe VID provisional licence
-test** (using a validated 1,249-question research bank). The architecture is
-designed to be reusable for any examination.
+Open `index.html` in a browser, or deploy it (see below).
 
-## Repository layout
+## Why this needs a backend
 
-```
-apps/web/                Mobile-first PWA (React + TypeScript + Vite + Tailwind)
-packages/content/        Question/content models and the curated bank
-packages/learning-engine/ Mastery, recommendations, readiness
-packages/assessment-engine/ Attempts, scoring, sessions, diagnostic, readiness
-packages/ai-gateway/     AI provider abstraction (mock provider wired)
-supabase/                Backend (Postgres schema `zivvvo`, migrations) — live
-docs/                    Product + engineering documentation (start here)
-research/                Competitive analysis of the incumbent platform
-tools/primaed/           PrimaEd research scrapers + answer-resolution pipeline
-data/primaed/            Scraped primaEd driving content, images, answer key
-```
+GitHub Pages only serves static files — it can't run code to write a score
+into a `.db` file when someone plays. To get one leaderboard that every
+visitor sees, some service has to accept writes from the public. This
+project uses **Supabase** (free-tier hosted Postgres with a public API) —
+you still don't run or maintain a server; you just get an API URL and a key.
 
-## Status
+Until you set that up — or whenever the backend can't be reached from a
+player's browser — the game plays in local mode: names aren't checked against
+the shared `players` table, and scores go to a per-device leaderboard stored
+in the browser instead of the shared one, so it's still fully playable.
 
-- **Engines:** `@zivvvo/learning-engine`, `@zivvvo/assessment-engine`, and
-  `@zivvvo/ai-gateway` are implemented and covered by 98 Vitest tests (incl. a
-  blueprint-driven mock exam builder and pass/fail scoring).
-- **Web app:** offline-first PWA — IndexedDB storage, seeded demo learners,
-  five screens (Home, Learn, Practice, Progress, Coach), question images,
-  readiness banner, mock exam mode. PWA manifest + icons + service-worker
-  precaching of the shell and all question images; production build green
-  (lazy supabase-js chunk).
-- **Sync:** live Supabase backend in an isolated `zivvvo` schema (no-touch vs.
-  the co-hosted EduStack product — `docs/supabase/no-touch-checklist.md`).
-  FIFO push of pending attempts, idempotent upsert, RLS scoped to the device
-  id; sync status card in Progress. Offline-only builds work with no env.
-  Remote acceptance is pending the platform's postgREST schema exposure
-  (ADR-022); "Download my data (JSON)" works entirely on-device today.
-- **Content pack:** 1,249 questions (980 answered, 269 consciously skipped),
-  19 concepts, 242 explanations, 446 image references (158 unique files),
-  8 topics.
-- **Research:** 2,119 question slots scraped; 327 testimonials; lessons are
-  gated pending account re-enrollment (see `docs/DECISIONS.md` ADR-009).
-- **Backend:** schema + client sync implemented; email auth and content-pack
-  distribution are the next stage. See `docs/ROADMAP.md`.
+## Set up the shared leaderboard (5 minutes)
 
-## Documentation
+1. Go to [supabase.com](https://supabase.com), sign up, and create a new project (free tier).
+2. In the project, open the **SQL Editor** and run:
 
-| Doc | Purpose |
-|-----|---------|
-| [docs/PRODUCT.md](docs/PRODUCT.md) | Product vision, promise, pillars, non-goals |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Domain architecture and rules |
-| [docs/CONTENT_MODEL.md](docs/CONTENT_MODEL.md) | Question, topic and explanation models |
-| [docs/LEARNING_ENGINE.md](docs/LEARNING_ENGINE.md) | Mastery, recommendations, readiness |
-| [docs/ASSESSMENT_ENGINE.md](docs/ASSESSMENT_ENGINE.md) | Attempts, scoring, mocks |
-| [docs/AI_ARCHITECTURE.md](docs/AI_ARCHITECTURE.md) | AI-as-explainer, provider abstraction |
-| [docs/OFFLINE_STRATEGY.md](docs/OFFLINE_STRATEGY.md) | Offline-first, IndexedDB, sync |
-| [docs/DATABASE.md](docs/DATABASE.md) | Backend data model (Supabase/Postgres) |
-| [docs/supabase/no-touch-checklist.md](docs/supabase/no-touch-checklist.md) | Shared-project isolation baseline |
-| [docs/UX_PRINCIPLES.md](docs/UX_PRINCIPLES.md) | Product experience principles |
-| [docs/DESIGN_SYSTEM.md](docs/DESIGN_SYSTEM.md) | Visual language and components |
-| [docs/ANALYTICS.md](docs/ANALYTICS.md) | Event tracking model |
-| [docs/SECURITY.md](docs/SECURITY.md) | Secrets, RLS, key handling |
-| [docs/ROADMAP.md](docs/ROADMAP.md) | Phases and Phase 1 deliverables |
-| [docs/DECISIONS.md](docs/DECISIONS.md) | Decision log and rationale |
+   ```sql
+   create table scores (
+     id uuid primary key default gen_random_uuid(),
+     name text not null,
+     ms integer not null,
+     games integer[],
+     source text not null default 'app',
+     created_at timestamptz default now()
+   );
 
-## Quick start
+   alter table scores enable row level security;
 
-```bash
-npm install
-npm run dev:web       # Vite dev server for the app
-npm test              # Vitest (engines + content pack + sync core, 98 tests)
-npm run typecheck     # tsc --noEmit across packages and the app
-npm run build:web     # copies images -> vite build -> emits dist/sw.js (PWA)
-npm run build:content # regenerate the content pack (after data changes)
-npm run copy:images   # refresh the served question images
-npm run make:icons    # regenerate PWA icons
-```
+   create policy "Anyone can read scores"
+     on scores for select
+     using (true);
+   ```
 
-### Cloud sync (optional)
+   The public key is **SELECT-only** on `scores`: there is deliberately no
+   INSERT policy, so nobody can inject a leaderboard row through the REST
+   API — not even with the browser key, which has to be exposed in your
+   site's JS for a static site. All score writes go through the `submit-score`
+   Edge Function, which uses the service-role key server-side and stamps each
+   row with `source = 'app'` (so entries that came through the real game can
+   be distinguished from anything else).
 
-1. Copy `apps/web/.env.example` to `apps/web/.env.local` and fill
-   `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` (publishable key only).
-2. Apply `supabase/migrations/001_init_zivvvo.sql` in the project's SQL Editor,
-   then add the `zivvvo` schema under **Project Settings → API → Exposed
-   schemas**.
-3. Rebuild (`npm run build:web`) or run `npm run dev:web`. Without the env
-   vars the app is purely offline — sync simply reports "Offline-only".
+   The game plays **5 games per round** and the function records `ms` (the
+   rounded average) plus the per-game times in `games`, so the leaderboard is
+   "fastest average" rather than a single lucky hit. A player can legitimately
+   land very fast single games by timing the green transition, and that's their
+   reward for practicing — `ms` still has to be a positive integer, and the
+   function rejects anything else.
 
-## Secrets
+   The game also needs a `players` table that reserves each racer name to the
+   first device that claims it (matched case-insensitively via `name_lower`):
 
-Credentials never live in the repository. Research scrapers read
-`PRIMAED_USER` / `PRIMAED_PASS` from the environment or from
-`data/primaed/.creds.txt` (gitignored). The web app reads
-`VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` from `apps/web/.env.local`
-(gitignored); the publishable key is public by design, while the secret and
-service-role keys stay server-side. See `docs/SECURITY.md` and
-`docs/DECISIONS.md` (ADR-021).
+   ```sql
+   create table players (
+     name_lower text primary key,
+     name text not null,
+     device_id uuid
+   );
+
+   alter table players enable row level security;
+
+   create policy "Anyone can read player names"
+     on players for select
+     using (true);
+
+   create policy "Anyone can register a name"
+     on players for insert
+     with check (true);
+
+   create policy "Only unclaimed names can be claimed"
+     on players for update
+     using (device_id is null)
+     with check (true);
+   ```
+
+   Name claiming is a first-come-first-served string, not a security boundary —
+   scores are, and they're write-protected as shown above.
+
+   The live feed (`postgres_changes` on `scores`) needs that table in the
+   realtime publication. In the dashboard it's **Database → Replication**, or:
+
+   ```sql
+   alter publication supabase_realtime add table public.scores, public.players;
+   ```
+
+3. Deploy the `submit-score` Edge Function (the only writer of scores; it
+   accepts a round of 5 games, averages them, and records `source = 'app'`):
+
+   ```bash
+   npx supabase functions deploy submit-score --project-ref <your-ref> --use-api
+   npx supabase secrets set SERVICE_ROLE_KEY=<your-service-secret-key> --project-ref <your-ref>
+   ```
+
+   `SERVICE_ROLE_KEY` is a service-role-scoped secret (Settings → API →
+   **secret** key in modern projects, or the legacy `service_role` JWT). The
+   function reads it at runtime and uses it only on the server — never sent to
+   the browser.
+
+4. In the project, go to **Settings → API**. Copy the **Project URL** and the
+    **publishable** public key.
+5. Open `config.js` in this project and paste them in:
+
+   ```js
+   window.RSR_CONFIG = {
+     SUPABASE_URL: "https://xxxxx.supabase.co",
+     SUPABASE_ANON_KEY: "sb_publishable_..."
+   };
+   ```
+
+6. Commit and push. That's it — every visitor reads the same `scores` table,
+    and every row carries `source = 'app'` from the function.
+
+## Key rotation / security notes
+
+- The **publishable** (browser) key can SELECT `scores` and INSERT/UPDATE
+  `players` (name claiming) only — RLS blocks everything else. It has no
+  INSERT on `scores`.
+- The **service-role secret** is only ever used by the Edge Function. Never
+  put it in `config.js` — that file is public.
+- If a browser-used key is ever leaked you can rotate it in **Settings →
+  API** without touching the function.
+
+## Deploy to GitHub Pages
+
+1. Push these files to a GitHub repo (`index.html`, `style.css`, `script.js`, `config.js`).
+2. **Settings → Pages** → Source: `Deploy from a branch` → branch `main`, folder `/ (root)` → Save.
+3. Live in about a minute at `https://<your-username>.github.io/<repo-name>/`.
+
+## Files
+
+- `index.html` — structure (name gate, game stage, leaderboard panel)
+- `style.css` — fullscreen layout and theme
+- `script.js` — game logic + leaderboard (Supabase, with local fallback)
+- `config.js` — your Supabase project URL and publishable key
+- `supabase/functions/submit-score/` — Edge Function (the only writer of scores) that validates a 5-game round, averages it, and inserts `source = 'app'` rows
+- `supabase/config.toml` — Supabase CLI project + function config

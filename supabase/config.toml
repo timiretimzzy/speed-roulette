@@ -1,12 +1,4 @@
-# Supabase local/CLI configuration (Zivvvo).
-# Remote project: uvmgmbwnsdebtkwldfaa (EduStack) — see docs/supabase/no-touch-checklist.md.
-# The remote schema is `zivvvo`; migrations live in supabase/migrations.
-project_id = "zivvvo"
+project_id = "rmqmdghtopurqcepezib"
 
-[api]
-enabled = true
-port = 54321
-schemas = ["public", "zivvvo"]
-
-[db]
-port = 54322
+[functions.submit-score]
+verify_jwt = true

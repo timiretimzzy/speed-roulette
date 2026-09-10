@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Reaction Speed Roulette</title>
+<meta property="og:title" content="Reaction Speed Roulette">
+<meta property="og:description" content="Tap to arm, then hit green as fast as you can. How fast is your reaction?">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://reaction-speed-roulette.vercel.app/">
+<meta property="og:image" content="https://reaction-speed-roulette.vercel.app/og-image.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://reaction-speed-roulette.vercel.app/og-image.png">
+<meta name="theme-color" content="#0b0b14">
+<link rel="icon" href="favicon.ico" sizes="32x32">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js"></script>
+</head>
+<body>
+
+<div class="bg" aria-hidden="true">
+  <div class="bg-orb orb-a"></div>
+  <div class="bg-orb orb-b"></div>
+  <div class="bg-orb orb-c"></div>
+  <div class="bg-grid"></div>
+  <div class="bg-grain"></div>
+  <div class="bg-vignette"></div>
+</div>
+<div id="flash" aria-hidden="true"></div>
+<canvas id="confetti" aria-hidden="true"></canvas>
+<div id="toasts" aria-live="polite"></div>
+
+<div id="name-gate" class="overlay">
+  <div class="gate-card">
+    <div class="gate-logo">
+      <span class="gate-logo-ring"><span class="gate-logo-dot"></span></span>
+      <span class="gate-logo-text">SPEED<span>◆</span>ROULETTE</span>
+    </div>
+    <div class="gate-eyebrow">reaction test · 001</div>
+    <h1 class="gate-title">what's your<br><em>racer name?</em></h1>
+    <p class="gate-sub">it's for the leaderboard. that's the only reason.</p>
+    <div class="gate-input-wrap">
+      <span id="name-avatar" class="avatar">?</span>
+      <input id="name-input" type="text" maxlength="18" placeholder="e.g. Tawanda" autocomplete="off">
+    </div>
+    <p id="name-error" class="error"></p>
+    <button id="name-submit"><span>let's go</span><span class="btn-arrow">→</span></button>
+    <p class="gate-hint">press <kbd>Enter</kbd> to start · your best is saved</p>
+  </div>
+</div>
+
+<div id="app" class="hidden">
+
+  <header class="topbar">
+    <div class="player">
+      <span id="player-avatar-main" class="avatar avatar-sm">–</span>
+      <span class="player-meta">
+        <span class="player-label">playing as</span>
+        <span id="player-name" class="player-name">—</span>
+      </span>
+    </div>
+    <div class="top-actions">
+      <button id="board-toggle" class="board-btn"><span class="trophy">🏆</span> leaderboard</button>
+      <button id="menu-toggle" class="menu-btn" aria-label="open menu" aria-expanded="false" title="menu">☰</button>
+    </div>
+  </header>
+
+  <main id="stage" class="stage" role="button" tabindex="0" aria-label="reaction game: tap to arm, then tap the instant it turns green">
+    <canvas id="stage-canvas" aria-hidden="true"></canvas>
+    <div id="cursor-aura" aria-hidden="true"></div>
+    <div class="stage-ui">
+      <a id="result-share" class="tweet-btn result-share hidden" href="#" target="_blank" rel="noopener">𝕏 tweet this</a>
+      <div id="result-actions" class="result-actions hidden">
+        <button id="share-card-btn" class="chip-btn" aria-label="share result as image card">🖼 share card</button>
+        <button id="rematch-btn" class="chip-btn chip-primary" aria-label="play another round immediately">↻ instant rematch</button>
+      </div>
+      <p id="result-note" class="result-note"></p>
+      <p class="stage-hint"><kbd>space</kbd> or <kbd>tap</kbd> to play</p>
+    </div>
+  </main>
+
+  <div class="bottom-chrome">
+    <div class="live-strip" aria-live="polite" hidden>
+      <span class="live-tag">LIVE</span>
+      <div class="ticker-mask"><div id="ticker" class="ticker">warming up the roulette…</div></div>
+    </div>
+    <div class="round-strip" id="round-strip">
+      <div class="round-head">
+        <span class="round-tag">round</span>
+        <span id="round-game-label" class="round-game-label">game 1/5</span>
+        <span class="round-avg-chip"><span id="round-avg-val">–</span><span class="round-avg-tag">avg</span></span>
+      </div>
+      <div class="round-slots" id="round-slots">
+        <span class="round-slot" data-slot="0"><b>1</b><i>–</i></span>
+        <span class="round-slot" data-slot="1"><b>2</b><i>–</i></span>
+        <span class="round-slot" data-slot="2"><b>3</b><i>–</i></span>
+        <span class="round-slot" data-slot="3"><b>4</b><i>–</i></span>
+        <span class="round-slot" data-slot="4"><b>5</b><i>–</i></span>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div id="menu" class="overlay menu-overlay hidden" aria-label="menu">
+  <div class="menu-panel" role="dialog" aria-modal="true">
+    <div class="menu-head">
+      <div>
+        <div class="board-eyebrow">menu</div>
+        <h2>options</h2>
+      </div>
+      <button id="menu-close" class="icon-btn" aria-label="close menu">×</button>
+    </div>
+
+    <section class="menu-section">
+      <h3>appearance</h3>
+      <div class="menu-row">
+        <span class="menu-label">🔊 sound</span>
+        <button id="sound-toggle" class="mini-btn" aria-label="toggle sound" title="sound">🔊</button>
+      </div>
+      <div class="menu-row">
+        <span class="menu-label">◐ theme</span>
+        <button id="theme-toggle" class="mini-btn" aria-label="toggle theme" title="theme">🌙</button>
+      </div>
+    </section>
+
+    <section class="menu-section">
+      <h3>your stats</h3>
+      <div class="menu-row">
+        <span class="menu-label">⚡ last average</span>
+        <span class="menu-val" id="stat-last">–</span>
+        <span id="trend-last" class="trend"></span>
+      </div>
+      <div class="menu-row">
+        <span class="menu-label">👑 best average</span>
+        <span class="menu-val" id="stat-best">–</span>
+        <span id="best-crown" class="crown-tag hidden">PB</span>
+      </div>
+      <div class="menu-row">
+        <span class="menu-label">◉ rounds</span>
+        <span class="menu-val" id="stat-rounds">0</span>
+      </div>
+      <div class="menu-form">
+        <div class="analytics-head"><span>📈 form guide</span><span id="analytics-avg" class="analytics-avg"></span></div>
+        <canvas id="sparkline" width="600" height="120"></canvas>
+        <div id="analytics-meta" class="analytics-meta"></div>
+      </div>
+    </section>
+
+    <section class="menu-section">
+      <h3>progress</h3>
+      <div class="menu-row">
+        <span class="menu-label">⚡ level</span>
+        <span class="menu-val" id="level-label">LVL 1</span>
+      </div>
+      <div class="menu-row">
+        <span class="menu-label">XP</span>
+        <div class="xp-bar"><div id="xp-fill"></div></div>
+        <span class="menu-small" id="xp-label">0 XP</span>
+      </div>
+      <div class="menu-row">
+        <span class="menu-label">🔥 streak</span>
+        <span id="streak-pill" class="mini-pill"><span id="streak-count">0</span></span>
+      </div>
+    </section>
+
+    <section class="menu-section">
+      <h3>daily challenge</h3>
+      <div id="challenge-pill" class="challenge-pill">🎯 daily: <b id="challenge-text">3× sub-300ms</b> <span id="challenge-progress">0/3</span></div>
+    </section>
+
+    <section class="menu-section">
+      <h3>status</h3>
+      <div class="menu-row">
+        <span class="menu-label">🟢 players online</span>
+        <span id="live-pill" class="mini-pill"><span class="live-dot"></span><span id="online-count">checking…</span></span>
+      </div>
+    </section>
+
+    <p class="menu-note">5 games = 1 round · your score is their average</p>
+  </div>
+</div>
+
+<div id="leaderboard" class="overlay hidden">
+  <div class="board-card">
+    <div class="board-head">
+      <div>
+        <div class="board-eyebrow">🏆 hall of speed</div>
+        <h2>leaderboard</h2>
+      </div>
+      <button id="board-close" class="icon-btn" aria-label="close leaderboard">×</button>
+    </div>
+    <p class="board-note">fastest average of 5 games wins. everyone who plays shows up here.</p>
+    <div id="podium" class="podium"></div>
+    <div class="board-tabs" role="tablist" aria-label="leaderboard scope">
+      <button id="board-tab-top" class="board-tab is-active" role="tab" aria-selected="true">Top 10</button>
+      <button id="board-tab-all" class="board-tab" role="tab" aria-selected="false">Everyone</button>
+    </div>
+    <div id="activity-section" class="activity-section" hidden>
+      <div class="activity-head">⚡ live activity</div>
+      <div id="activity-feed" class="activity-feed"></div>
+    </div>
+    <ol id="board-list" class="board-list"></ol>
+    <p id="board-status" class="board-note"></p>
+    <a id="board-tweet" class="tweet-btn hidden" href="#" target="_blank" rel="noopener">𝕏 tweet your score</a>
+  </div>
+</div>
+
+<div id="share-modal" class="overlay hidden">
+  <div class="board-card share-card">
+    <div class="board-head"><div><div class="board-eyebrow">share your speed</div><h2 id="share-title">248ms ⚡</h2></div><button id="share-close" class="icon-btn" aria-label="close share card">×</button></div>
+    <canvas id="share-canvas" width="900" height="1120"></canvas>
+    <div class="share-row">
+      <button id="share-download" class="tweet-btn" style="margin:0;flex:1" aria-label="download result card as image">⬇ download</button>
+      <button id="share-native" class="tweet-btn" style="margin:0;flex:1" aria-label="share result card via device share menu">↗ share</button>
+    </div>
+  </div>
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>
